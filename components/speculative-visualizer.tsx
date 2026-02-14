@@ -1,51 +1,42 @@
 "use client"
 
 import { useState, useRef, useCallback, useEffect } from "react"
-import { motion, AnimatePresence } from "framer-motion"
+import { motion } from "framer-motion"
 import { Play, RotateCcw, Cpu, Cloud, Check, X, Zap } from "lucide-react"
 import { cn } from "@/lib/utils"
 import logData from "@/data/speculative-log.json"
 
 /* ── Constants ── */
 const GREEN = "hsl(142, 71%, 45%)"
-const RED = "hsl(0, 72%, 51%)"
 const BLUE = "hsl(217, 91%, 60%)"
 const YELLOW = "hsl(48, 96%, 53%)"
 const DIM = "hsl(240, 5%, 25%)"
 
+const DRAFT_COLORS = [
+  { label: "Draft A", border: "border-emerald-500/40", bg: "bg-emerald-500/10", text: "text-emerald-300" },
+  { label: "Draft B", border: "border-violet-500/40", bg: "bg-violet-500/10", text: "text-violet-300" },
+  { label: "Draft C", border: "border-amber-500/40", bg: "bg-amber-500/10", text: "text-amber-300" },
+]
+
 /* ── Types ── */
 type VisPhase = "idle" | "running" | "complete"
-
-interface AnimToken {
-  id: number
-  text: string
-  type: "accepted" | "rejected" | "corrected"
-  stage: "draft" | "fly-right" | "verify" | "fly-result" | "done"
-  roundNum: number
-}
-
-interface RoundStats {
-  round_num: number
-  drafted: number
-  accepted: number
-  corrected: number
-  acceptance_rate: number
-  verification_time_ms: number
-}
-
 interface LogToken {
   text: string
-  type: "accepted" | "rejected" | "corrected"
+  status: "accepted" | "rejected"
+}
+
+interface LogDraft {
+  id: string
+  tokens: LogToken[]
+  accepted_count: number
 }
 
 interface LogRound {
   round_num: number
-  drafted: number
-  accepted: number
-  corrected: number
   verification_time_ms: number
-  acceptance_rate: number
-  tokens: LogToken[]
+  drafts: LogDraft[]
+  chosen_draft: string
+  correction: { text: string } | null
 }
 
 interface LogData {
@@ -59,6 +50,14 @@ interface LogData {
     speculation_rounds: number
     generation_time_ms: number
   }
+}
+
+interface RoundStats {
+  round_num: number
+  drafted: number
+  accepted: number
+  verification_time_ms: number
+  chosen_draft: string
 }
 
 /* ── Sub-components ── */
@@ -81,7 +80,7 @@ function NodePanel({
   return (
     <motion.div
       className={cn(
-        "relative flex w-56 shrink-0 flex-col rounded-2xl border-2 p-4",
+        "relative flex w-64 shrink-0 flex-col rounded-2xl border-2 p-4",
         "bg-card/60 backdrop-blur-sm",
       )}
       style={{ borderColor: active ? color : DIM }}
@@ -118,40 +117,43 @@ function NodePanel({
           />
         )}
       </div>
-      <div className="min-h-[120px]">{children}</div>
+      <div className="min-h-[300px]">{children}</div>
     </motion.div>
   )
 }
 
 function TokenPill({
   text,
-  type,
+  variant,
   animateIn,
   showIcon,
-  neutral,
+  iconType,
 }: {
   text: string
-  type: "accepted" | "rejected" | "corrected"
+  variant: "neutral" | "accepted" | "rejected" | "corrected" | "dimmed"
   animateIn?: boolean
   showIcon?: boolean
-  neutral?: boolean
+  iconType?: "accepted" | "rejected" | "corrected"
 }) {
-  const bg = neutral
-    ? "bg-green-500/10 border-green-500/25 text-green-200"
-    : type === "accepted"
-      ? "bg-green-500/20 border-green-500/40 text-green-300"
-      : type === "rejected"
-        ? "bg-red-500/20 border-red-500/40 text-red-300"
-        : "bg-blue-500/20 border-blue-500/40 text-blue-300"
+  const bg =
+    variant === "neutral"
+      ? "bg-green-500/10 border-green-500/25 text-green-200"
+      : variant === "accepted"
+        ? "bg-green-500/20 border-green-500/40 text-green-300"
+        : variant === "rejected"
+          ? "bg-red-500/20 border-red-500/40 text-red-300"
+          : variant === "corrected"
+            ? "bg-blue-500/20 border-blue-500/40 text-blue-300"
+            : "bg-muted/20 border-muted/30 text-muted-foreground/50"
 
   const icon =
-    type === "accepted" ? (
+    iconType === "accepted" ? (
       <Check className="h-2.5 w-2.5 text-green-400" />
-    ) : type === "rejected" ? (
+    ) : iconType === "rejected" ? (
       <X className="h-2.5 w-2.5 text-red-400" />
-    ) : (
+    ) : iconType === "corrected" ? (
       <Zap className="h-2.5 w-2.5 text-blue-400" />
-    )
+    ) : null
 
   return (
     <motion.span
@@ -169,44 +171,92 @@ function TokenPill({
   )
 }
 
-function FlyingToken({
-  text,
-  type,
-  direction,
-  onDone,
-  neutral,
+function DraftRow({
+  draftIndex,
+  tokens,
 }: {
-  text: string
-  type: "accepted" | "rejected" | "corrected"
-  direction: "right" | "left"
-  onDone: () => void
-  neutral?: boolean
+  draftIndex: number
+  tokens: { text: string }[]
 }) {
-  const color = neutral ? GREEN : type === "accepted" ? GREEN : type === "rejected" ? RED : BLUE
+  const style = DRAFT_COLORS[draftIndex]
+  return (
+    <div className={cn("flex items-start gap-1.5 rounded-lg border px-2 py-1.5", style.border, style.bg)}>
+      <span className={cn("mt-0.5 shrink-0 text-[9px] font-bold uppercase tracking-wider", style.text)}>
+        {style.label}
+      </span>
+      <div className="flex flex-wrap gap-0.5">
+        {tokens.map((tok, i) => (
+          <motion.span
+            key={i}
+            className={cn("rounded px-1 py-0.5 font-mono text-[10px]", style.text, "bg-white/5")}
+            initial={{ opacity: 0, y: 4 }}
+            animate={{ opacity: 1, y: 0 }}
+            transition={{ delay: i * 0.05, duration: 0.2 }}
+          >
+            {tok.text}
+          </motion.span>
+        ))}
+      </div>
+    </div>
+  )
+}
 
+function VerifyRow({
+  draftIndex,
+  tokens,
+  isWinner,
+  acceptedCount,
+  correction,
+}: {
+  draftIndex: number
+  tokens: LogToken[]
+  isWinner: boolean
+  acceptedCount: number
+  correction: { text: string } | null
+}) {
+  const style = DRAFT_COLORS[draftIndex]
   return (
     <motion.div
-      className="absolute top-1/2 flex -translate-y-1/2 items-center gap-1 rounded-md border px-2 py-1 font-mono text-[11px]"
-      style={{
-        borderColor: `${color}66`,
-        backgroundColor: `${color}15`,
-        color,
-        boxShadow: `0 0 12px 2px ${color}44`,
-      }}
-      initial={{
-        left: direction === "right" ? "0%" : "100%",
-        opacity: 0,
-        scale: 0.6,
-      }}
-      animate={{
-        left: direction === "right" ? "100%" : "0%",
-        opacity: [0, 1, 1, 0.6],
-        scale: [0.6, 1.1, 1, 0.9],
-      }}
-      transition={{ duration: 0.5, ease: "easeInOut" }}
-      onAnimationComplete={onDone}
+      className={cn(
+        "flex items-start gap-1.5 rounded-lg border px-2 py-1.5",
+        isWinner ? "border-green-500/40 bg-green-500/10" : "border-muted/30 bg-muted/5",
+      )}
+      initial={{ opacity: 0 }}
+      animate={{ opacity: 1 }}
+      transition={{ duration: 0.2 }}
     >
-      {text}
+      <div className="flex shrink-0 flex-col items-center gap-0.5">
+        <span className={cn("text-[9px] font-bold uppercase tracking-wider", style.text)}>
+          {style.label}
+        </span>
+        <span className={cn(
+          "rounded px-1 font-mono text-[9px] font-bold",
+          isWinner ? "bg-green-500/20 text-green-400" : "bg-muted/20 text-muted-foreground",
+        )}>
+          {acceptedCount}/{tokens.length}
+        </span>
+      </div>
+      <div className="flex flex-wrap gap-0.5">
+        {tokens.map((tok, i) => (
+          <TokenPill
+            key={i}
+            text={tok.text}
+            variant={tok.status === "accepted" ? "accepted" : "rejected"}
+            showIcon
+            iconType={tok.status === "accepted" ? "accepted" : "rejected"}
+            animateIn
+          />
+        ))}
+        {isWinner && correction && (
+          <TokenPill
+            text={correction.text}
+            variant="corrected"
+            showIcon
+            iconType="corrected"
+            animateIn
+          />
+        )}
+      </div>
     </motion.div>
   )
 }
@@ -231,8 +281,8 @@ function StatsBar({ rounds }: { rounds: RoundStats[] }) {
       </div>
       <div className="h-3 w-px bg-border/50" />
       <div className="flex items-center gap-1.5">
-        <span className="text-muted-foreground">Drafted</span>
-        <span className="font-mono font-bold text-foreground">{totalDrafted}</span>
+        <span className="text-muted-foreground">Best Draft</span>
+        <span className="font-mono font-bold text-yellow-400">{latest.chosen_draft.toUpperCase()}</span>
       </div>
       <div className="h-3 w-px bg-border/50" />
       <div className="flex items-center gap-1.5">
@@ -255,17 +305,25 @@ function StatsBar({ rounds }: { rounds: RoundStats[] }) {
   )
 }
 
+/* ── Animation stage for each round ── */
+type RoundAnimStage = "idle" | "drafting" | "flying" | "verifying" | "choosing" | "done"
+
+interface RoundAnimState {
+  roundNum: number
+  stage: RoundAnimStage
+  round: LogRound
+}
+
 /* ── Main export ── */
 export function SpeculativeVisualizer() {
   const data = logData as LogData
 
   const [phase, setPhase] = useState<VisPhase>("idle")
-  const [tokens, setTokens] = useState<AnimToken[]>([])
+  const [currentRound, setCurrentRound] = useState<RoundAnimState | null>(null)
   const [rounds, setRounds] = useState<RoundStats[]>([])
   const [resultTokens, setResultTokens] = useState<{ text: string; type: string }[]>([])
   const [finalStats, setFinalStats] = useState<LogData["summary"] | null>(null)
 
-  const tokenIdRef = useRef(0)
   const cancelledRef = useRef(false)
   const timeoutsRef = useRef<ReturnType<typeof setTimeout>[]>([])
 
@@ -274,11 +332,10 @@ export function SpeculativeVisualizer() {
     timeoutsRef.current.forEach(clearTimeout)
     timeoutsRef.current = []
     setPhase("idle")
-    setTokens([])
+    setCurrentRound(null)
     setRounds([])
     setResultTokens([])
     setFinalStats(null)
-    tokenIdRef.current = 0
   }, [])
 
   const schedule = useCallback((fn: () => void, delay: number) => {
@@ -290,125 +347,93 @@ export function SpeculativeVisualizer() {
 
   const startVisualization = useCallback(() => {
     reset()
-    // Allow a tick for reset to clear
     setTimeout(() => {
       cancelledRef.current = false
       setPhase("running")
 
       let globalDelay = 0
-      const DRAFT_STAGGER = 100   // stagger tokens appearing in draft node
-      const BATCH_HOLD = 400      // pause after all drafted before flying
-      const FLY_DURATION = 500    // time for flight animation
-      const VERIFY_HOLD = 300     // pause after last verdict before clearing
-      const ROUND_GAP = 600       // pause between rounds
+      const DRAFT_PHASE = 400      // time to show drafts appearing
+      const FLY_PHASE = 400        // flying animation
+      const VERIFY_PHASE = 250     // show all verdicts at once
+      const CORRECTION_DELAY = 300 // extra delay for correction token
+      const CHOOSE_PHASE = 500     // highlight winner
+      const ROUND_GAP = 250        // pause between rounds
 
       data.rounds.forEach((round) => {
-        const roundTokens = round.tokens
-        const batchIds: number[] = []
+        const chosenDraft = round.drafts.find((d) => d.id === round.chosen_draft)!
+        const hasCorrection = round.correction !== null
 
-        // Stage 1: All tokens appear in draft node (staggered slightly)
-        roundTokens.forEach((tok, i) => {
-          const id = ++tokenIdRef.current
-          batchIds.push(id)
-          const animToken: AnimToken = {
-            id,
-            text: tok.text,
-            type: tok.type,
-            stage: "draft",
-            roundNum: round.round_num,
-          }
-          schedule(() => {
-            setTokens((prev) => [...prev, animToken])
-          }, globalDelay + i * DRAFT_STAGGER)
-        })
-
-        const draftDone = globalDelay + roundTokens.length * DRAFT_STAGGER + BATCH_HOLD
-
-        // Stage 2: Entire batch flies to target at once
+        // Stage: drafting — show 3 draft rows in draft node
         schedule(() => {
-          setTokens((prev) =>
-            prev.map((t) =>
-              batchIds.includes(t.id) ? { ...t, stage: "fly-right" } : t,
-            ),
-          )
-        }, draftDone)
+          setCurrentRound({ roundNum: round.round_num, stage: "drafting", round })
+        }, globalDelay)
 
-        const flyDone = draftDone + FLY_DURATION
+        globalDelay += DRAFT_PHASE
 
-        // Stage 3: Accepted tokens appear all at once; corrected tokens appear after a delay
-        const acceptedIds: number[] = []
-        const correctedIds: number[] = []
-        roundTokens.forEach((tok, i) => {
-          if (tok.type === "accepted") acceptedIds.push(batchIds[i])
-          else if (tok.type === "rejected") acceptedIds.push(batchIds[i]) // rejected shows instantly too
-          else if (tok.type === "corrected") correctedIds.push(batchIds[i])
-        })
-
-        // All accepted + rejected appear at once (parallel verification)
+        // Stage: flying — tokens in transit
         schedule(() => {
-          setTokens((prev) =>
-            prev.map((t) =>
-              acceptedIds.includes(t.id) ? { ...t, stage: "verify" } : t,
-            ),
-          )
-        }, flyDone)
+          setCurrentRound({ roundNum: round.round_num, stage: "flying", round })
+        }, globalDelay)
 
-        // Corrected tokens appear after a delay (autoregressive generation)
-        const CORRECTION_DELAY = 600
-        correctedIds.forEach((id, i) => {
-          schedule(() => {
-            setTokens((prev) =>
-              prev.map((t) => (t.id === id ? { ...t, stage: "verify" } : t)),
-            )
-          }, flyDone + CORRECTION_DELAY + i * 300)
-        })
+        globalDelay += FLY_PHASE
 
-        const lastCorrectionTime = correctedIds.length > 0
-          ? CORRECTION_DELAY + correctedIds.length * 300
-          : 0
-        const verifyDone = flyDone + Math.max(VERIFY_HOLD, lastCorrectionTime + VERIFY_HOLD)
-
-        // Stage 4: Clear batch — move accepted/corrected to result
+        // Stage: verifying — show verdicts at target (all at once for accepted/rejected)
         schedule(() => {
-          setTokens((prev) =>
-            prev.map((t) =>
-              batchIds.includes(t.id) ? { ...t, stage: "done" } : t,
-            ),
-          )
-          roundTokens.forEach((tok) => {
-            if (tok.type === "accepted" || tok.type === "corrected") {
-              setResultTokens((prev) => [...prev, { text: tok.text, type: tok.type }])
+          setCurrentRound({ roundNum: round.round_num, stage: "verifying", round })
+        }, globalDelay)
+
+        globalDelay += VERIFY_PHASE
+
+        // If there's a correction, wait extra for it to appear autoregressively
+        if (hasCorrection) {
+          globalDelay += CORRECTION_DELAY
+        }
+
+        // Stage: choosing — highlight the winner
+        schedule(() => {
+          setCurrentRound({ roundNum: round.round_num, stage: "choosing", round })
+        }, globalDelay)
+
+        globalDelay += CHOOSE_PHASE
+
+        // Stage: done — add to result, emit stats
+        schedule(() => {
+          setCurrentRound({ roundNum: round.round_num, stage: "done", round })
+
+          // Add accepted tokens from winner + correction to result
+          chosenDraft.tokens.forEach((tok) => {
+            if (tok.status === "accepted") {
+              setResultTokens((prev) => [...prev, { text: tok.text, type: "accepted" }])
             }
           })
-        }, verifyDone)
+          if (round.correction) {
+            setResultTokens((prev) => [...prev, { text: round.correction!.text, type: "corrected" }])
+          }
 
-        // Emit round stats
-        schedule(() => {
           setRounds((prev) => [
             ...prev,
             {
               round_num: round.round_num,
-              drafted: round.drafted,
-              accepted: round.accepted,
-              corrected: round.corrected,
-              acceptance_rate: round.acceptance_rate,
+              drafted: chosenDraft.tokens.length * round.drafts.length,
+              accepted: chosenDraft.accepted_count + (round.correction ? 1 : 0),
               verification_time_ms: round.verification_time_ms,
+              chosen_draft: round.chosen_draft,
             },
           ])
-        }, verifyDone)
+        }, globalDelay)
 
-        globalDelay = verifyDone + ROUND_GAP
+        globalDelay += ROUND_GAP
       })
 
-      // After all rounds, show final stats
+      // Complete
       schedule(() => {
+        setCurrentRound(null)
         setFinalStats(data.summary)
         setPhase("complete")
-      }, globalDelay + 1500)
+      }, globalDelay + 1000)
     }, 50)
   }, [reset, data, schedule])
 
-  // Cleanup on unmount
   useEffect(() => {
     return () => {
       cancelledRef.current = true
@@ -416,13 +441,9 @@ export function SpeculativeVisualizer() {
     }
   }, [])
 
-  // Separate tokens by stage for rendering
-  const draftStageTokens = tokens.filter((t) => t.stage === "draft")
-  const flyingTokens = tokens.filter((t) => t.stage === "fly-right")
-  const verifyTokens = tokens.filter((t) => t.stage === "verify")
-
-  const isDraftActive = phase === "running" && (draftStageTokens.length > 0 || flyingTokens.length > 0)
-  const isTargetActive = phase === "running" && (flyingTokens.length > 0 || verifyTokens.length > 0)
+  const isDraftActive = currentRound?.stage === "drafting" || currentRound?.stage === "flying"
+  const isTargetActive = currentRound?.stage === "verifying" || currentRound?.stage === "choosing"
+  const isFlying = currentRound?.stage === "flying"
 
   return (
     <div className="flex flex-1 flex-col items-center gap-6 overflow-y-auto px-6 py-8">
@@ -432,12 +453,12 @@ export function SpeculativeVisualizer() {
           Speculative Decoding Visualizer
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">
-          Watch how draft and target models collaborate to generate text faster
+          Draft model generates 3 candidate sequences and target picks the longest match
         </p>
       </div>
 
       {/* Fixed prompt display */}
-      <div className="w-full max-w-2xl rounded-xl border border-border/50 bg-card/40 px-4 py-3 backdrop-blur-sm">
+      <div className="w-full max-w-3xl rounded-xl border border-border/50 bg-card/40 px-4 py-3 backdrop-blur-sm">
         <div className="mb-1 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
           Prompt
         </div>
@@ -445,89 +466,101 @@ export function SpeculativeVisualizer() {
       </div>
 
       {/* Main visualization area */}
-      <div className="flex w-full max-w-4xl items-stretch gap-0">
+      <div className="flex w-full max-w-5xl items-stretch gap-0">
         {/* Draft node */}
         <NodePanel
           label="Draft Node"
           sublabel="Qwen 1.5B · RTX 3060"
           icon={Cpu}
-          active={isDraftActive}
+          active={!!isDraftActive}
           color={GREEN}
         >
-          <div className="flex flex-wrap gap-1">
-            <AnimatePresence>
-              {draftStageTokens.map((t) => (
+          {currentRound && (currentRound.stage === "drafting") && (
+            <div className="flex flex-col gap-1.5">
+              {currentRound.round.drafts.map((draft, i) => (
                 <motion.div
-                  key={t.id}
-                  exit={{ opacity: 0, scale: 0.5, x: 20 }}
-                  transition={{ duration: 0.2 }}
+                  key={draft.id}
+                  initial={{ opacity: 0, x: -10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ delay: i * 0.06, duration: 0.2 }}
                 >
-                  <TokenPill text={t.text} type={t.type} animateIn neutral />
+                  <DraftRow
+                    draftIndex={i}
+                    tokens={draft.tokens}
+                  />
                 </motion.div>
               ))}
-            </AnimatePresence>
-            {phase === "running" && draftStageTokens.length === 0 && flyingTokens.length === 0 && (
-              <span className="text-[10px] text-muted-foreground/60">Generating tokens...</span>
-            )}
-          </div>
+            </div>
+          )}
+          {currentRound && currentRound.stage === "flying" && (
+            <div className="flex flex-col gap-1.5 opacity-30">
+              {currentRound.round.drafts.map((draft, i) => (
+                <DraftRow key={draft.id} draftIndex={i} tokens={draft.tokens} />
+              ))}
+            </div>
+          )}
+          {phase === "running" && !currentRound && (
+            <span className="text-[10px] text-muted-foreground/60">Waiting...</span>
+          )}
+          {phase === "running" && currentRound && currentRound.stage !== "drafting" && currentRound.stage !== "flying" && (
+            <span className="text-[10px] text-muted-foreground/60">Waiting for next round...</span>
+          )}
         </NodePanel>
 
         {/* Connection lane */}
         <div className="relative flex flex-1 flex-col justify-center px-2">
-          {/* Top label */}
           <div className="absolute -top-4 left-1/2 -translate-x-1/2 whitespace-nowrap text-[9px] font-medium uppercase tracking-widest text-muted-foreground/50">
             Token Transfer
           </div>
 
-          {/* Draft → Target lane */}
-          <div className="relative mb-4 flex items-center">
-            <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-green-400/60">
-              Draft Tokens →
-            </span>
-            <motion.div
-              className="h-px w-full"
-              style={{
-                backgroundImage: `repeating-linear-gradient(to right, ${GREEN} 0px, ${GREEN} 6px, transparent 6px, transparent 12px)`,
-              }}
-              animate={{ opacity: isDraftActive ? 0.5 : 0.12 }}
-              transition={{ duration: 0.3 }}
-            />
-            <div
-              className="ml-[-6px] h-0 w-0 shrink-0 border-y-[4px] border-l-[6px] border-y-transparent"
-              style={{ borderLeftColor: GREEN, opacity: isDraftActive ? 0.6 : 0.15 }}
-            />
-            {/* Flying tokens */}
-            <div className="absolute inset-0">
-              <AnimatePresence>
-                {flyingTokens.map((t) => (
-                  <FlyingToken
-                    key={t.id}
-                    text={t.text}
-                    type={t.type}
-                    direction="right"
-                    onDone={() => {}}
-                    neutral
-                  />
-                ))}
-              </AnimatePresence>
+          {/* 3 draft lanes */}
+          {[0, 1, 2].map((i) => (
+            <div key={i} className="relative mb-3 flex items-center">
+              {i === 0 && (
+                <span className="absolute -top-3 left-1/2 -translate-x-1/2 text-[9px] text-green-400/60">
+                  3 Draft Batches →
+                </span>
+              )}
+              <motion.div
+                className="h-px w-full"
+                style={{
+                  backgroundImage: `repeating-linear-gradient(to right, ${GREEN} 0px, ${GREEN} 4px, transparent 4px, transparent 10px)`,
+                }}
+                animate={{ opacity: isDraftActive ? 0.4 : 0.08 }}
+                transition={{ duration: 0.3 }}
+              />
+              <div
+                className="ml-[-5px] h-0 w-0 shrink-0 border-y-[3px] border-l-[5px] border-y-transparent"
+                style={{ borderLeftColor: GREEN, opacity: isDraftActive ? 0.5 : 0.1 }}
+              />
+              {/* Flying dot */}
+              {isFlying && (
+                <motion.div
+                  className="absolute top-1/2 h-2 w-2 -translate-y-1/2 rounded-full"
+                  style={{ backgroundColor: GREEN, boxShadow: `0 0 8px 2px ${GREEN}` }}
+                  initial={{ left: "0%", opacity: 0, scale: 0.5 }}
+                  animate={{ left: "100%", opacity: [0, 1, 1, 0], scale: [0.5, 1.2, 1, 0.5] }}
+                  transition={{ duration: 0.4, ease: "easeInOut" }}
+                />
+              )}
             </div>
-          </div>
+          ))}
 
-          {/* Target → Result lane */}
-          <div className="relative flex items-center">
+          {/* Return lane */}
+          <div className="relative mt-1 flex items-center">
             <span className="absolute -bottom-3 left-1/2 -translate-x-1/2 text-[9px] text-blue-400/60">
-              ← Verified
+              ← Best Sequence
             </span>
             <div
-              className="mr-[-6px] h-0 w-0 shrink-0 border-y-[4px] border-r-[6px] border-y-transparent"
-              style={{ borderRightColor: BLUE, opacity: isTargetActive ? 0.6 : 0.15 }}
+              className="mr-[-5px] h-0 w-0 shrink-0 border-y-[3px] border-r-[5px] border-y-transparent"
+              style={{ borderRightColor: BLUE, opacity: isTargetActive ? 0.5 : 0.1 }}
             />
             <motion.div
               className="h-px w-full"
               style={{
-                backgroundImage: `repeating-linear-gradient(to right, ${BLUE} 0px, ${BLUE} 6px, transparent 6px, transparent 12px)`,
+                backgroundImage: `repeating-linear-gradient(to right, ${BLUE} 0px, ${BLUE} 4px, transparent 4px, transparent 10px)`,
               }}
-              animate={{ opacity: isTargetActive ? 0.5 : 0.12 }}
+              animate={{ opacity: isTargetActive ? 0.4 : 0.08 }}
               transition={{ duration: 0.3 }}
             />
           </div>
@@ -538,27 +571,32 @@ export function SpeculativeVisualizer() {
           label="Target Node"
           sublabel="Qwen 7B · H100"
           icon={Cloud}
-          active={isTargetActive}
+          active={!!isTargetActive}
           color={YELLOW}
         >
-          <div className="flex flex-wrap gap-1">
-            <AnimatePresence>
-              {verifyTokens.map((t) => (
+          {currentRound && (currentRound.stage === "verifying" || currentRound.stage === "choosing") && (
+            <div className="flex flex-col gap-1.5">
+              {currentRound.round.drafts.map((draft, i) => (
                 <motion.div
-                  key={t.id}
-                  initial={{ opacity: 0, scale: 0.8, x: -10 }}
-                  animate={{ opacity: 1, scale: 1, x: 0 }}
-                  exit={{ opacity: 0, scale: 0.5, y: 10 }}
-                  transition={{ duration: 0.25 }}
+                  key={draft.id}
+                  initial={{ opacity: 0, x: 10 }}
+                  animate={{ opacity: 1, x: 0 }}
+                  transition={{ duration: 0.2 }}
                 >
-                  <TokenPill text={t.text} type={t.type} showIcon animateIn />
+                  <VerifyRow
+                    draftIndex={i}
+                    tokens={draft.tokens}
+                    isWinner={currentRound.stage === "choosing" && draft.id === currentRound.round.chosen_draft}
+                    acceptedCount={draft.accepted_count}
+                    correction={draft.id === currentRound.round.chosen_draft ? currentRound.round.correction : null}
+                  />
                 </motion.div>
               ))}
-            </AnimatePresence>
-            {phase === "running" && verifyTokens.length === 0 && !isDraftActive && (
-              <span className="text-[10px] text-muted-foreground/60">Waiting for tokens...</span>
-            )}
-          </div>
+            </div>
+          )}
+          {phase === "running" && currentRound && currentRound.stage !== "verifying" && currentRound.stage !== "choosing" && (
+            <span className="text-[10px] text-muted-foreground/60">Waiting for tokens...</span>
+          )}
         </NodePanel>
       </div>
 
@@ -568,14 +606,14 @@ export function SpeculativeVisualizer() {
       {/* Result text */}
       {resultTokens.length > 0 && (
         <motion.div
-          className="w-full max-w-2xl rounded-xl border border-border/50 bg-card/40 px-4 py-3 backdrop-blur-sm"
+          className="w-full max-w-3xl rounded-xl border border-border/50 bg-card/40 px-4 py-3 backdrop-blur-sm"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
         >
           <div className="mb-2 text-[10px] font-medium uppercase tracking-widest text-muted-foreground">
             Generated Output
           </div>
-          <div className="flex flex-wrap gap-0.5 font-mono text-sm leading-relaxed">
+          <p className="font-mono text-sm leading-relaxed whitespace-pre-wrap">
             {resultTokens.map((t, i) => (
               <span
                 key={i}
@@ -598,14 +636,14 @@ export function SpeculativeVisualizer() {
                 transition={{ duration: 0.8, repeat: Infinity }}
               />
             )}
-          </div>
+          </p>
         </motion.div>
       )}
 
       {/* Final stats */}
       {phase === "complete" && finalStats && (
         <motion.div
-          className="w-full max-w-2xl rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3"
+          className="w-full max-w-3xl rounded-xl border border-green-500/30 bg-green-500/5 px-4 py-3"
           initial={{ opacity: 0, y: 10 }}
           animate={{ opacity: 1, y: 0 }}
         >
