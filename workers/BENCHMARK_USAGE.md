@@ -1,4 +1,4 @@
-# GSM8K Benchmark Usage Guide
+# GSM8K / HumanEval Benchmark Usage Guide
 
 ## Quick Start
 
@@ -6,14 +6,20 @@
 # Make sure target server is running
 ./start_target_server.sh --strategy deterministic
 
-# Run benchmark with 10 questions (default)
+# Run GSM8K benchmark with 10 questions (default)
 python benchmark_gsm8k.py
+
+# Run HumanEval code completion benchmark
+python benchmark_gsm8k.py --humaneval
 
 # Run with more questions
 python benchmark_gsm8k.py --num-samples 50
 
 # Use HuggingFace dataset (requires: pip install datasets)
 python benchmark_gsm8k.py --num-samples 50 --use-hf
+
+# HumanEval with full dataset from HuggingFace
+python benchmark_gsm8k.py --humaneval --use-hf --num-samples 50
 ```
 
 ## What It Measures
@@ -105,7 +111,9 @@ Saved as `gsm8k_benchmark_<timestamp>.json`:
 python benchmark_gsm8k.py [OPTIONS]
 
 Options:
-  --draft-model TEXT        Draft model (default: facebook/opt-350m)
+  --humaneval              Use HumanEval code completion dataset instead of GSM8K
+  --draft-model TEXT       Draft model (default: Qwen/Qwen2.5-1.5B-Instruct)
+  --target-model TEXT      Target model (default: Qwen/Qwen2.5-3B-Instruct)
   --server TEXT            Verification server address (default: localhost:50051)
   --num-samples INTEGER    Number of questions to test (default: 10)
   --max-tokens INTEGER     Max tokens per question (default: 512)

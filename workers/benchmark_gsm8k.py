@@ -1,8 +1,11 @@
 #!/usr/bin/env python3
 """
-GSM8K Benchmark for Speculative Decoding
+GSM8K / HumanEval Benchmark for Speculative Decoding
 
-Tests the draft→target speculative decoding system on grade school math questions.
+Tests the draft→target speculative decoding system on:
+- GSM8K: grade school math questions
+- HumanEval: Python code completion (use --humaneval flag)
+
 Measures acceptance rate, speed, and correctness.
 """
 import sys
@@ -64,6 +67,28 @@ GSM8K_SAMPLES = [
     },
 ]
 
+# Sample HumanEval problems (code completion tasks)
+HUMANEVAL_SAMPLES = [
+    {
+        "task_id": "HumanEval/0",
+        "prompt": 'def has_close_elements(numbers: List[float], threshold: float) -> bool:\n    """ Check if in given list of numbers, are any two numbers closer to each other than\n    given threshold.\n    >>> has_close_elements([1.0, 2.0, 3.0], 0.5)\n    False\n    >>> has_close_elements([1.0, 2.8, 3.0, 4.0, 5.0, 2.0], 0.3)\n    True\n    """\n',
+        "entry_point": "has_close_elements",
+        "canonical_solution": "    for idx, elem in enumerate(numbers):\n        for idx2, elem2 in enumerate(numbers):\n            if idx != idx2:\n                distance = abs(elem - elem2)\n                if distance < threshold:\n                    return True\n    return False\n",
+    },
+    {
+        "task_id": "HumanEval/1",
+        "prompt": 'def separate_paren_groups(paren_string: str) -> List[str]:\n    """ Input string is valid parentheses string containing only "(",")". Split\n    it into list of string where each string is one group of balanced parentheses.\n    >>> separate_paren_groups("( ) (( )) (( )( ))") \n    ["()", "(())", "(()())"]\n    """\n',
+        "entry_point": "separate_paren_groups",
+        "canonical_solution": "    result = []\n    current_string = []\n    current_depth = 0\n    for c in paren_string:\n        if c == \'(\':\n            current_depth += 1\n            current_string.append(c)\n        elif c == \')\':\n            current_depth -= 1\n            current_string.append(c)\n            if current_depth == 0:\n                result.append(\'\'.join(current_string))\n                current_string.clear()\n    return result\n",
+    },
+    {
+        "task_id": "HumanEval/2",
+        "prompt": 'def truncate_number(n: float) -> float:\n    """ Return the first positive number that can be obtained by repeatedly summing the digits of n.\n    >>> truncate_number(1234)\n    1\n    >>> truncate_number(0.0)\n    0\n    """\n',
+        "entry_point": "truncate_number",
+        "canonical_solution": "    if n == 0:\n        return 0\n    return n - int(n)\n",
+    },
+]
+
 
 def load_gsm8k_from_hf(num_samples=50):
     """Load GSM8K dataset from HuggingFace"""
@@ -99,6 +124,39 @@ def load_gsm8k_from_hf(num_samples=50):
         return GSM8K_SAMPLES[:num_samples]
 
 
+def load_humaneval_from_hf(num_samples=50):
+    """Load HumanEval dataset from HuggingFace"""
+    try:
+        from datasets import load_dataset
+
+        print("Loading HumanEval dataset from HuggingFace...")
+        dataset = load_dataset("openai/openai_humaneval", split="test")
+
+        samples = []
+        for i, item in enumerate(dataset):
+            if i >= num_samples:
+                break
+            samples.append({
+                "task_id": item["task_id"],
+                "prompt": item["prompt"],
+                "entry_point": item["entry_point"],
+                "canonical_solution": item["canonical_solution"],
+                "test": item.get("test", ""),
+            })
+
+        print(f"Loaded {len(samples)} problems from HuggingFace HumanEval")
+        return samples
+
+    except ImportError:
+        print("⚠ HuggingFace datasets not installed. Using built-in samples.")
+        print("  To use full dataset: pip install datasets")
+        return HUMANEVAL_SAMPLES[:num_samples]
+    except Exception as e:
+        print(f"⚠ Error loading from HuggingFace: {e}")
+        print("  Falling back to built-in samples.")
+        return HUMANEVAL_SAMPLES[:num_samples]
+
+
 def run_benchmark(
     draft_model="Qwen/Qwen2.5-1.5B-Instruct",
     target_model="Qwen/Qwen2.5-3B-Instruct",
@@ -107,13 +165,16 @@ def run_benchmark(
     max_tokens=512,
     temperature=0.0,
     use_hf_dataset=False,
+    humaneval=False,
 ):
-    """Run GSM8K benchmark"""
+    """Run benchmark (GSM8K or HumanEval)"""
 
+    benchmark_name = "HumanEval" if humaneval else "GSM8K"
     print("\n" + "="*100)
-    print("GSM8K BENCHMARK - Speculative Decoding Performance Test")
+    print(f"{benchmark_name} BENCHMARK - Speculative Decoding Performance Test")
     print("="*100)
     print(f"\nConfiguration:")
+    print(f"  Dataset: {benchmark_name}")
     print(f"  Draft Model: {draft_model}")
     print(f"  Target Model: {target_model} (via verification server)")
     print(f"  Samples: {num_samples}")
@@ -123,10 +184,16 @@ def run_benchmark(
     print("="*100 + "\n")
 
     # Load dataset
-    if use_hf_dataset:
-        questions = load_gsm8k_from_hf(num_samples)
+    if humaneval:
+        if use_hf_dataset:
+            questions = load_humaneval_from_hf(num_samples)
+        else:
+            questions = HUMANEVAL_SAMPLES[:num_samples]
     else:
-        questions = GSM8K_SAMPLES[:num_samples]
+        if use_hf_dataset:
+            questions = load_gsm8k_from_hf(num_samples)
+        else:
+            questions = GSM8K_SAMPLES[:num_samples]
 
     # Initialize client
     print("Initializing draft node client...")
@@ -144,14 +211,27 @@ def run_benchmark(
         print(f"\n{'─'*100}")
         print(f"Question {i+1}/{len(questions)}")
         print(f"{'─'*100}")
-        print(f"Q: {item['question']}")
-        print(f"Expected answer: {item['answer']}")
+
+        if humaneval:
+            task_id = item.get("task_id", f"humaneval-{i}")
+            prompt_text = item["prompt"]
+            expected = item.get("canonical_solution", "")
+            print(f"Task: {task_id}")
+            print(f"Prompt: {prompt_text[:150]}...")
+            print(f"Expected (canonical): {expected[:100]}...")
+            model_prompt = f"Complete the following Python function. Output only the function body completion, no explanation.\n\n{prompt_text}"
+            request_id = f"humaneval-{i}"
+        else:
+            print(f"Q: {item['question']}")
+            print(f"Expected answer: {item['answer']}")
+            model_prompt = f"Question: {item['question']}\n\nAnswer: Let's solve this step by step.\n"
+            request_id = f"gsm8k-{i}"
         print()
 
         # Create request
         request = speculative_decoding_pb2.InferenceJobRequest(
-            request_id=f"gsm8k-{i}",
-            prompt=f"Question: {item['question']}\n\nAnswer: Let's solve this step by step.\n",
+            request_id=request_id,
+            prompt=model_prompt,
             params=common_pb2.InferenceParams(
                 max_tokens=max_tokens,
                 temperature=temperature,
@@ -168,20 +248,31 @@ def run_benchmark(
         elapsed = time.time() - start_time
 
         # Store results
-        result = {
-            'question_num': i + 1,
-            'question': item['question'],
-            'expected_answer': item['answer'],
-            'generated_text': response.generated_text,
+        if humaneval:
+            result = {
+                'question_num': i + 1,
+                'task_id': item.get("task_id", f"humaneval-{i}"),
+                'prompt': item['prompt'],
+                'canonical_solution': item.get('canonical_solution', ''),
+                'generated_text': response.generated_text,
+            }
+        else:
+            result = {
+                'question_num': i + 1,
+                'question': item['question'],
+                'expected_answer': item['answer'],
+                'generated_text': response.generated_text,
+            }
+        result.update({
             'total_tokens': response.total_tokens,
             'draft_generated': response.draft_tokens_generated,
             'draft_accepted': response.draft_tokens_accepted,
             'acceptance_rate': response.acceptance_rate,
             'speculation_rounds': response.speculation_rounds,
             'generation_time_ms': response.generation_time_ms,
-            'wall_time_seconds': elapsed,  # Added: total wall time including overhead
+            'wall_time_seconds': elapsed,
             'tokens_per_sec': response.total_tokens / (response.generation_time_ms / 1000) if response.generation_time_ms > 0 else 0,
-        }
+        })
         results.append(result)
 
         # Print summary for this question
@@ -244,10 +335,12 @@ def run_benchmark(
             print(f"   {label}: {count} questions ({count/len(results)*100:.1f}%)")
 
     # Save results to file
-    output_file = f"gsm8k_benchmark_{int(time.time())}.json"
+    output_prefix = "humaneval" if humaneval else "gsm8k"
+    output_file = f"{output_prefix}_benchmark_{int(time.time())}.json"
     with open(output_file, 'w') as f:
         json.dump({
             'config': {
+                'dataset': benchmark_name,
                 'draft_model': draft_model,
                 'target_model': target_model,
                 'num_samples': num_samples,
@@ -275,7 +368,9 @@ def run_benchmark(
 
 
 def main():
-    parser = argparse.ArgumentParser(description='GSM8K Benchmark for Speculative Decoding')
+    parser = argparse.ArgumentParser(description='GSM8K / HumanEval Benchmark for Speculative Decoding')
+    parser.add_argument('--humaneval', action='store_true',
+                        help='Use HumanEval code completion dataset instead of GSM8K')
     parser.add_argument('--draft-model', type=str, default='Qwen/Qwen2.5-1.5B-Instruct',
                         help='Draft model to use (default: Qwen/Qwen2.5-1.5B-Instruct)')
     parser.add_argument('--target-model', type=str, default='Qwen/Qwen2.5-3B-Instruct',
@@ -301,6 +396,7 @@ def main():
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         use_hf_dataset=args.use_hf,
+        humaneval=args.humaneval,
     )
 
 

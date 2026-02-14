@@ -21,7 +21,7 @@ class DraftNodeClient:
     def __init__(
         self,
         draft_model="Qwen/Qwen2.5-1.5B-Instruct",  # Match Qwen family for target
-        verification_server="localhost:50051",
+        verification_server="100.82.221.67:50",
         num_draft_tokens=5,
     ):
         print(f"Initializing draft node with model: {draft_model}")
@@ -67,6 +67,14 @@ class DraftNodeClient:
 
         max_tokens = request.params.max_tokens if request.params.max_tokens > 0 else 16
         draft_tokens_per_round = request.params.draft_tokens if request.params.draft_tokens > 0 else self.num_draft_tokens
+
+        # Collect all EOS token IDs (Qwen has <|endoftext|> and <|im_end|>, etc.)
+        eos_token_ids = set()
+        if getattr(self.tokenizer, 'eos_token_id', None) is not None:
+            eos_token_ids.add(self.tokenizer.eos_token_id)
+        for token in ("<|endoftext|>", "<|im_end|>"):
+            if token in self.tokenizer.get_vocab():
+                eos_token_ids.add(self.tokenizer.convert_tokens_to_ids(token))
 
         print(f"\n{'='*80}")
         print(f"🚀 Starting inference for request: {request.request_id}")
@@ -146,6 +154,7 @@ class DraftNodeClient:
                     print(f"    Corrected: +{len(verify_response.corrected_token_ids)} tokens from target")
 
                 # Add to result
+                eos_reached = False
                 for token_id in accepted_tokens:
                     token = common_pb2.Token(
                         token_id=token_id,
@@ -153,15 +162,40 @@ class DraftNodeClient:
                         logprob=0.0,  # Could track this
                     )
                     all_tokens.append(token)
+                    if eos_token_ids and token_id in eos_token_ids:
+                        eos_reached = True
+                        break
 
-                # Add corrected tokens
-                for i, token_id in enumerate(verify_response.corrected_token_ids):
+                if not eos_reached:
+                    for i, token_id in enumerate(verify_response.corrected_token_ids):
+                        token = common_pb2.Token(
+                            token_id=token_id,
+                            text=self.tokenizer.decode([token_id]),
+                            logprob=verify_response.corrected_logprobs[i] if i < len(verify_response.corrected_logprobs) else 0.0,
+                        )
+                        all_tokens.append(token)
+                        if eos_token_ids and token_id in eos_token_ids:
+                            eos_reached = True
+                            break
+
+                # Check next_token_id from target (when all draft tokens accepted)
+                if not eos_reached and eos_token_ids and verify_response.next_token_id in eos_token_ids:
                     token = common_pb2.Token(
-                        token_id=token_id,
-                        text=self.tokenizer.decode([token_id]),
-                        logprob=verify_response.corrected_logprobs[i] if i < len(verify_response.corrected_logprobs) else 0.0,
+                        token_id=verify_response.next_token_id,
+                        text=self.tokenizer.decode([verify_response.next_token_id]),
+                        logprob=verify_response.next_token_logprob if verify_response.next_token_logprob else 0.0,
                     )
                     all_tokens.append(token)
+                    current_token_ids.append(verify_response.next_token_id)
+                    eos_reached = True
+
+                if eos_reached:
+                    # Truncate current_token_ids to remove any tokens after EOS
+                    eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
+                    if eos_idx is not None:
+                        current_token_ids = current_token_ids[:eos_idx + 1]
+                    print(f"    EOS token reached, ending generation")
+                    break
 
                 # Update current text
                 current_text = self.tokenizer.decode(current_token_ids, skip_special_tokens=True)
