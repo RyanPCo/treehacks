@@ -34,6 +34,32 @@ class VerificationStrategy:
         """
         raise NotImplementedError
 
+    def verify_batch(
+        self,
+        candidates: List[Dict[str, Any]],
+        target_token_ids: List[int],
+        target_logprobs: List[Dict[int, Any]],
+    ) -> List[Tuple[int, List[bool], List[int], List[float]]]:
+        """Vectorized verification of N candidates against same target tokens.
+
+        Each candidate is a dict with 'draft_token_ids' and 'draft_logprobs'.
+        Returns a list of (num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs)
+        per candidate.
+
+        Default implementation falls back to per-candidate verify() calls.
+        Subclasses can override for vectorized logic.
+        """
+        results = []
+        for c in candidates:
+            result = self.verify(
+                draft_token_ids=c['draft_token_ids'],
+                draft_logprobs=c['draft_logprobs'],
+                target_token_ids=target_token_ids,
+                target_logprobs=target_logprobs,
+            )
+            results.append(result)
+        return results
+
 
 class DeterministicVerification(VerificationStrategy):
     """
@@ -75,6 +101,56 @@ class DeterministicVerification(VerificationStrategy):
                 break  # Stop after first mismatch
 
         return num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs
+
+    def verify_batch(self, candidates, target_token_ids, target_logprobs):
+        """Vectorized batch verification using numpy."""
+        n = len(candidates)
+        k = len(target_token_ids)
+
+        if n == 0 or k == 0:
+            return [(0, [], [], []) for _ in range(n)]
+
+        # Pad candidates to same length and stack into (N, k) matrix
+        draft_matrix = np.zeros((n, k), dtype=np.int64)
+        draft_lengths = np.zeros(n, dtype=np.int64)
+        for i, c in enumerate(candidates):
+            length = min(len(c['draft_token_ids']), k)
+            draft_matrix[i, :length] = c['draft_token_ids'][:length]
+            draft_lengths[i] = length
+
+        target_array = np.array(target_token_ids[:k])  # (k,)
+
+        # Vectorized match: (N, k) boolean matrix
+        match_matrix = (draft_matrix == target_array)
+
+        # Mask out positions beyond each candidate's actual length
+        for i in range(n):
+            match_matrix[i, int(draft_lengths[i]):] = False
+
+        # Find accepted prefix length: cumprod breaks at first False
+        cumulative_match = np.cumprod(match_matrix, axis=1)
+        accepted_lengths = cumulative_match.sum(axis=1)  # (N,)
+
+        # Build per-candidate results with corrections
+        results = []
+        for i in range(n):
+            num_accepted = int(accepted_lengths[i])
+            dl = int(draft_lengths[i])
+            acceptance_mask = match_matrix[i, :dl].tolist()
+
+            corrected_tokens = []
+            corrected_logprobs_list = []
+            if num_accepted < dl and num_accepted < k:
+                target_token = int(target_array[num_accepted])
+                corrected_tokens.append(target_token)
+                if target_logprobs and num_accepted < len(target_logprobs):
+                    lp_dict = target_logprobs[num_accepted]
+                    if target_token in lp_dict:
+                        corrected_logprobs_list.append(lp_dict[target_token].logprob)
+
+            results.append((num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs_list))
+
+        return results
 
 
 class ProbabilisticVerification(VerificationStrategy):

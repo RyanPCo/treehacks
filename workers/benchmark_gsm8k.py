@@ -160,12 +160,14 @@ def load_humaneval_from_hf(num_samples=50):
 def run_benchmark(
     draft_model="Qwen/Qwen2.5-1.5B-Instruct",
     target_model="Qwen/Qwen2.5-3B-Instruct",
-    verification_server="localhost:50051",
     num_samples=10,
     max_tokens=512,
     temperature=0.0,
     use_hf_dataset=False,
     humaneval=False,
+    num_candidates=1,
+    candidate_temperature=1.0,
+    candidate_top_p=0.9,
 ):
     """Run benchmark (GSM8K or HumanEval)"""
 
@@ -176,11 +178,15 @@ def run_benchmark(
     print(f"\nConfiguration:")
     print(f"  Dataset: {benchmark_name}")
     print(f"  Draft Model: {draft_model}")
-    print(f"  Target Model: {target_model} (via verification server)")
+    print(f"  Target Model: {target_model} (via Modal)")
     print(f"  Samples: {num_samples}")
     print(f"  Max Tokens: {max_tokens}")
     print(f"  Temperature: {temperature}")
     print(f"  Data Source: {'HuggingFace' if use_hf_dataset else 'Built-in samples'}")
+    print(f"  Num Candidates: {num_candidates}")
+    if num_candidates > 1:
+        print(f"  Candidate Temperature: {candidate_temperature}")
+        print(f"  Candidate Top-P: {candidate_top_p}")
     print("="*100 + "\n")
 
     # Load dataset
@@ -199,8 +205,10 @@ def run_benchmark(
     print("Initializing draft node client...")
     client = DraftNodeClient(
         draft_model=draft_model,
-        verification_server=verification_server,
         num_draft_tokens=5,
+        num_candidates=num_candidates,
+        candidate_temperature=candidate_temperature,
+        candidate_top_p=candidate_top_p,
     )
 
     # Run benchmark
@@ -236,7 +244,7 @@ def run_benchmark(
                 max_tokens=max_tokens,
                 temperature=temperature,
                 top_k=-1 if temperature == 0 else 50,
-                draft_tokens=5,
+                draft_tokens=10,
             ),
             model_id=target_model,
             timestamp=int(time.time() * 1000),
@@ -282,9 +290,6 @@ def run_benchmark(
         print(f"   Acceptance: {response.acceptance_rate:.1%} ({response.draft_tokens_accepted}/{response.draft_tokens_generated})")
         print(f"   Tokens: {response.total_tokens}")
         print(f"   Rounds: {response.speculation_rounds}")
-
-        # Small delay to prevent overload
-        time.sleep(0.5)
 
     total_elapsed = time.time() - total_start_time
 
@@ -349,6 +354,9 @@ def run_benchmark(
                 'num_samples': num_samples,
                 'max_tokens': max_tokens,
                 'temperature': temperature,
+                'num_candidates': num_candidates,
+                'candidate_temperature': candidate_temperature,
+                'candidate_top_p': candidate_top_p,
             },
             'summary': {
                 'avg_acceptance_rate': avg_acceptance,
@@ -374,12 +382,10 @@ def main():
     parser = argparse.ArgumentParser(description='GSM8K / HumanEval Benchmark for Speculative Decoding')
     parser.add_argument('--humaneval', action='store_true',
                         help='Use HumanEval code completion dataset instead of GSM8K')
-    parser.add_argument('--draft-model', type=str, default='Qwen/Qwen2.5-1.5B-Instruct',
-                        help='Draft model to use (default: Qwen/Qwen2.5-1.5B-Instruct)')
-    parser.add_argument('--target-model', type=str, default='Qwen/Qwen2.5-3B-Instruct',
-                        help='Target model (on server) (default: Qwen/Qwen2.5-3B-Instruct)')
-    parser.add_argument('--server', type=str, default='localhost:50051',
-                        help='Verification server address (default: localhost:50051)')
+    parser.add_argument('--draft-model', type=str, default='Qwen/Qwen2.5-0.5B-Instruct',
+                        help='Draft model to use (default: Qwen/Qwen3-1.7B-Instruct)')
+    parser.add_argument('--target-model', type=str, default='Qwen/Qwen2.5-0.5B-Instruct',
+                        help='Target model (on server) (default: Qwen/Qwen3-1.7B-Instruct)')
     parser.add_argument('--num-samples', type=int, default=10,
                         help='Number of questions to test (default: 10)')
     parser.add_argument('--max-tokens', type=int, default=512,
@@ -388,18 +394,26 @@ def main():
                         help='Sampling temperature (default: 0.0 for greedy)')
     parser.add_argument('--use-hf', action='store_true',
                         help='Load dataset from HuggingFace (requires: pip install datasets)')
+    parser.add_argument('--num-candidates', type=int, default=1,
+                        help='Number of draft candidates per round (default: 1)')
+    parser.add_argument('--candidate-temp', type=float, default=1.0,
+                        help='Temperature for multi-candidate draft sampling (default: 1.0)')
+    parser.add_argument('--candidate-top-p', type=float, default=0.9,
+                        help='Top-p for multi-candidate draft sampling (default: 0.9)')
 
     args = parser.parse_args()
 
     run_benchmark(
         draft_model=args.draft_model,
         target_model=args.target_model,
-        verification_server=args.server,
         num_samples=args.num_samples,
         max_tokens=args.max_tokens,
         temperature=args.temperature,
         use_hf_dataset=args.use_hf,
         humaneval=args.humaneval,
+        num_candidates=args.num_candidates,
+        candidate_temperature=args.candidate_temp,
+        candidate_top_p=args.candidate_top_p,
     )
 
 

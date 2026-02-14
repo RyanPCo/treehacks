@@ -247,9 +247,9 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Target Node Verification Service')
     parser.add_argument('--port', type=int, default=50051, help='Port to listen on')
-    parser.add_argument('--model', type=str, default='Qwen/Qwen2.5-0.5B-Instruct',
-                        help='Target model to use (default: Qwen/Qwen2.5-0.5B-Instruct)')
-    parser.add_argument('--strategy', type=str, default='deterministic',
+    parser.add_argument('--model', type=str, default='Qwen/Qwen3-32B-Instruct',
+                        help='Target model to use (default: Qwen/Qwen2.5-3B-Instruct)')
+    parser.add_argument('--strategy', type=str, default='probabilistic',
                         choices=['deterministic', 'probabilistic', 'threshold', 'greedy'],
                         help='Verification strategy to use')
     parser.add_argument('--threshold', type=float, default=0.1,
