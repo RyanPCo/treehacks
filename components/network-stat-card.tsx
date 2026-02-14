@@ -40,7 +40,7 @@ export function NetworkStatCard({ icon: Icon, label, value, sub, color, index }:
             <div className="min-w-0">
               <p className="text-xs text-muted-foreground">{label}</p>
               <div className="flex items-baseline gap-1.5">
-                <span className="text-2xl font-bold tracking-tight text-foreground">{value}</span>
+                <span className="font-heading text-2xl font-bold tracking-tight text-foreground">{value}</span>
                 <span className="text-xs text-muted-foreground">{sub}</span>
               </div>
             </div>

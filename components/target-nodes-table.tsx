@@ -32,7 +32,7 @@ export function TargetNodesTable() {
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-3">
           <div className="flex items-center justify-between">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
               <Server className="h-4 w-4 text-accent" />
               Target Nodes (Cloud)
             </CardTitle>

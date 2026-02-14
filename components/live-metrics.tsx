@@ -20,14 +20,14 @@ export function LiveMetrics() {
       <motion.div custom={0} initial="hidden" animate="visible" variants={cardVariants}>
         <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
               <CheckCircle2 className="h-4 w-4 text-green-400" />
               Draft Acceptance Rate
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold tracking-tight text-foreground">82%</span>
+              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">82%</span>
               <span className="text-xs text-muted-foreground">of draft tokens accepted</span>
             </div>
             <Progress value={82} className="mt-3 h-2" />
@@ -38,14 +38,14 @@ export function LiveMetrics() {
       <motion.div custom={1} initial="hidden" animate="visible" variants={cardVariants}>
         <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
               <Zap className="h-4 w-4 text-yellow-400" />
               Effective Speed
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold tracking-tight text-foreground">145</span>
+              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">145</span>
               <span className="text-xs text-muted-foreground">tokens / second</span>
             </div>
             <div className="mt-3 flex items-center gap-1.5">
@@ -61,14 +61,14 @@ export function LiveMetrics() {
       <motion.div custom={2} initial="hidden" animate="visible" variants={cardVariants}>
         <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
           <CardHeader className="pb-2">
-            <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+            <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
               <CloudOff className="h-4 w-4 text-blue-400" />
               Cloud Compute Saved
             </CardTitle>
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="text-3xl font-bold tracking-tight text-foreground">60%</span>
+              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">60%</span>
               <span className="text-xs text-muted-foreground">reduction in cloud calls</span>
             </div>
             <Progress value={60} className="mt-3 h-2 [&>[data-state]]:bg-blue-500" />

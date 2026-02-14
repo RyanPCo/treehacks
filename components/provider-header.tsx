@@ -12,7 +12,7 @@ export function ProviderHeader() {
       className="flex items-center justify-between"
     >
       <div>
-        <h2 className="text-xl font-bold tracking-tight text-foreground">
+        <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">
           Provider Dashboard
         </h2>
         <p className="mt-1 text-sm text-muted-foreground">

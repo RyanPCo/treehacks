@@ -43,7 +43,7 @@ export function DashboardHeader() {
         <div className="flex h-8 w-8 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
           <Network className="h-4 w-4 text-primary" />
         </div>
-        <h1 className="text-lg font-bold tracking-tight text-foreground">SpecNet</h1>
+        <h1 className="font-heading text-lg font-bold tracking-tight text-foreground">SpecNet</h1>
         <span className="hidden text-xs text-muted-foreground sm:inline">
           Distributed Speculative Decoding
         </span>

@@ -34,7 +34,7 @@ export function NetworkExplorer() {
     <div className="flex flex-1 flex-col gap-6 overflow-y-auto p-6">
       {/* Page header */}
       <div>
-        <h2 className="text-xl font-bold tracking-tight text-foreground">Network Explorer</h2>
+        <h2 className="font-heading text-2xl font-bold tracking-tight text-foreground">Network Explorer</h2>
         <p className="mt-1 text-sm text-muted-foreground">
           Live view of available Draft and Target nodes.
         </p>

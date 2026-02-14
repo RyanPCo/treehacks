@@ -1,6 +1,12 @@
 import type { Metadata, Viewport } from "next"
+import { Geist } from "next/font/google"
 import { Inter, JetBrains_Mono } from "next/font/google"
 import "./globals.css"
+
+const geist = Geist({
+  subsets: ["latin"],
+  variable: "--font-geist",
+})
 
 const inter = Inter({
   subsets: ["latin"],
@@ -29,7 +35,7 @@ export default function RootLayout({
 }) {
   return (
     <html lang="en" className="dark">
-      <body className={`${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
+      <body className={`${geist.variable} ${inter.variable} ${jetbrainsMono.variable} font-sans antialiased`}>
         {children}
       </body>
     </html>

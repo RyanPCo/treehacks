@@ -19,12 +19,12 @@ export function TotalEarningsCard() {
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
                   <DollarSign className="h-4 w-4 text-primary" />
                 </div>
-                <p className="text-sm font-medium text-muted-foreground">
+                <p className="font-heading text-sm font-medium text-muted-foreground">
                   Total Earnings this Month
                 </p>
               </div>
               <div className="mt-4 flex items-baseline gap-3">
-                <span className="font-mono text-5xl font-bold tracking-tight text-foreground">
+                <span className="font-heading text-5xl font-bold tracking-tight text-foreground">
                   $42.50
                 </span>
                 <span className="flex items-center gap-1 rounded-md bg-primary/10 px-2 py-0.5 text-xs font-semibold text-primary">
@@ -35,7 +35,7 @@ export function TotalEarningsCard() {
             </div>
             <div className="hidden flex-col items-end gap-1 text-right sm:flex">
               <p className="text-xs text-muted-foreground">Projected this month</p>
-              <span className="font-mono text-lg font-semibold text-foreground/70">
+              <span className="font-heading text-lg font-semibold text-foreground/70">
                 ~$58.00
               </span>
             </div>

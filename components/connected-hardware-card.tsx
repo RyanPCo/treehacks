@@ -15,7 +15,7 @@ export function ConnectedHardwareCard() {
     >
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardHeader className="pb-3">
-          <CardTitle className="flex items-center gap-2 text-sm font-medium text-muted-foreground">
+          <CardTitle className="flex items-center gap-2 font-heading text-sm font-medium text-muted-foreground">
             <Cpu className="h-4 w-4 text-accent" />
             Connected Hardware
           </CardTitle>
@@ -28,7 +28,7 @@ export function ConnectedHardwareCard() {
                 <Cpu className="h-5 w-5 text-accent" />
               </div>
               <div>
-                <p className="font-mono text-sm font-semibold text-foreground">
+                <p className="font-heading text-sm font-semibold text-foreground">
                   Desktop-RTX-3060
                 </p>
                 <p className="text-xs text-muted-foreground">NVIDIA RTX 3060 12GB</p>
@@ -50,13 +50,13 @@ export function ConnectedHardwareCard() {
           <div className="grid grid-cols-2 gap-4 rounded-lg border border-border/40 bg-secondary/20 p-4">
             <div>
               <p className="text-xs text-muted-foreground">Total Tokens Drafted</p>
-              <p className="mt-1 font-mono text-lg font-bold text-foreground">
+              <p className="mt-1 font-heading text-lg font-bold text-foreground">
                 4.2M
               </p>
             </div>
             <div>
               <p className="text-xs text-muted-foreground">Uptime</p>
-              <p className="mt-1 font-mono text-lg font-bold text-foreground">
+              <p className="mt-1 font-heading text-lg font-bold text-foreground">
                 99.2%
               </p>
             </div>
@@ -65,7 +65,7 @@ export function ConnectedHardwareCard() {
           {/* Draft Acceptance Rate */}
           <div className="space-y-3">
             <div className="flex items-center justify-between">
-              <p className="text-sm font-medium text-foreground">
+              <p className="font-heading text-sm font-medium text-foreground">
                 Draft Acceptance Rate
               </p>
               <span className="font-mono text-sm font-bold text-foreground">78%</span>
