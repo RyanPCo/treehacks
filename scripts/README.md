@@ -1,0 +1,1 @@
+convenient sh scirpts for running shit
