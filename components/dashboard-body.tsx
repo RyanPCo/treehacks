@@ -7,12 +7,14 @@ import { ChatPanel, type VisibleToken } from "@/components/chat-panel"
 import { ChatInput } from "@/components/chat-input"
 import { LiveMetrics } from "@/components/live-metrics"
 import { PanelRightOpen, PanelRightClose } from "lucide-react"
+import { streamInference, checkHealth } from "@/lib/api"
+import type { StreamMessage, TokenEvent } from "@/lib/types"
 
-// ── Token data ──
+// ── Demo token data (fallback when backend is offline) ──
 type TokenType = "accepted" | "rejected" | "corrected"
 interface Token { text: string; type: TokenType }
 
-const tokenStream: Token[] = [
+const DEMO_TOKEN_STREAM: Token[] = [
   { text: "The", type: "accepted" },
   { text: " theory", type: "accepted" },
   { text: " of", type: "accepted" },
@@ -80,7 +82,9 @@ const tokenStream: Token[] = [
   { text: " massive objects.", type: "corrected" },
 ]
 
-// ── Steps ──
+const DEMO_PROMPT = "Explain the theory of relativity."
+
+// ── Animation helpers (for demo mode) ──
 type AnimStep =
   | { kind: "accepted"; token: Token; index: number }
   | { kind: "rejection"; rejected: Token; corrected: Token; rejIdx: number; corrIdx: number }
@@ -101,25 +105,48 @@ function buildSteps(tokens: Token[]): AnimStep[] {
   return steps
 }
 
-const STEPS = buildSteps(tokenStream)
+const DEMO_STEPS = buildSteps(DEMO_TOKEN_STREAM)
 const ACCEPTED_DELAY = 60
 const REJECTED_SHOW_DELAY = 80
 const STRIKE_PAUSE = 500
 const INITIAL_DELAY = 800
 
+// Token animation delay for live streaming
+const STREAM_TOKEN_DELAY = 20
+const WORDS_PER_PACKET = 3
+
+function countWords(text: string): number {
+  return text.trim().split(/\s+/).filter(Boolean).length
+}
+
 export function DashboardBody() {
   const [sidebarOpen, setSidebarOpen] = useState(true)
+  const [backendOnline, setBackendOnline] = useState<boolean | null>(null)
+  const [isStreaming, setIsStreaming] = useState(false)
 
-  // Shared state that drives BOTH the visualizer and the chat panel
+  // Shared state
   const [phase, setPhase] = useState<NetworkPhase>("idle")
-  const [currentToken, setCurrentToken] = useState("")
+  const [prompt, setPrompt] = useState(DEMO_PROMPT)
   const [visibleTokens, setVisibleTokens] = useState<VisibleToken[]>([])
   const [done, setDone] = useState(false)
   const [counts, setCounts] = useState({ accepted: 0, rejected: 0, corrected: 0, drafted: 0 })
   const [packets, setPackets] = useState<PacketEvent[]>([])
+
+  // Metrics from backend
+  const [acceptanceRate, setAcceptanceRate] = useState(82)
+  const [tokensPerSecond, setTokensPerSecond] = useState(145)
+  const [cloudSaved, setCloudSaved] = useState(60)
+
   const packetId = useRef(0)
+  const packetWordBuffer = useRef<{ draft: number; verify: number }>({ draft: 0, verify: 0 })
   const stepIdx = useRef(0)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
+  const cleanupRef = useRef<(() => void) | null>(null)
+
+  // Check backend health on mount
+  useEffect(() => {
+    checkHealth().then(setBackendOnline)
+  }, [])
 
   const emitPacket = useCallback((lane: "draft" | "verify", color: string) => {
     const id = packetId.current++
@@ -127,26 +154,36 @@ export function DashboardBody() {
     setPackets((prev) => [...prev, { id, direction, lane, color }])
   }, [])
 
+  const emitPacketForWords = useCallback((lane: "draft" | "verify", color: string, text: string) => {
+    const words = countWords(text)
+    if (words === 0) return
+
+    packetWordBuffer.current[lane] += words
+    while (packetWordBuffer.current[lane] >= WORDS_PER_PACKET) {
+      emitPacket(lane, color)
+      packetWordBuffer.current[lane] -= WORDS_PER_PACKET
+    }
+  }, [emitPacket])
+
   const handlePacketDone = useCallback((id: number) => {
     setPackets((prev) => prev.filter((p) => p.id !== id))
   }, [])
 
-  const processStep = useCallback(() => {
-    if (stepIdx.current >= STEPS.length) {
+  // ── Demo mode animation ──
+  const processDemoStep = useCallback(() => {
+    if (stepIdx.current >= DEMO_STEPS.length) {
       setDone(true)
       setPhase("complete")
-      setCurrentToken("")
       return
     }
 
-    const step = STEPS[stepIdx.current]
+    const step = DEMO_STEPS[stepIdx.current]
     stepIdx.current += 1
 
     if (step.kind === "accepted") {
       setPhase("drafting")
-      setCurrentToken(step.token.text.trim())
-      emitPacket("draft", "hsl(142, 71%, 45%)")
-      emitPacket("verify", "hsl(217, 91%, 60%)")
+      emitPacketForWords("draft", "hsl(142, 71%, 45%)", step.token.text)
+      emitPacketForWords("verify", "hsl(217, 91%, 60%)", step.token.text)
       setVisibleTokens(prev => [...prev, { text: step.token.text, type: step.token.type, phase: "settled" }])
       setCounts(prev => ({
         ...prev,
@@ -154,20 +191,16 @@ export function DashboardBody() {
         accepted: step.token.type === "accepted" ? prev.accepted + 1 : prev.accepted,
         corrected: step.token.type === "corrected" ? prev.corrected + 1 : prev.corrected,
       }))
-      timeoutRef.current = setTimeout(processStep, ACCEPTED_DELAY)
+      timeoutRef.current = setTimeout(processDemoStep, ACCEPTED_DELAY)
     } else {
-      // Drafting the rejected token
       setPhase("drafting")
-      setCurrentToken(step.rejected.text.trim())
-      emitPacket("draft", "hsl(142, 71%, 45%)")
+      emitPacketForWords("draft", "hsl(142, 71%, 45%)", step.rejected.text)
       setVisibleTokens(prev => [...prev, { text: step.rejected.text, type: "rejected", phase: "appearing" }])
       setCounts(prev => ({ ...prev, drafted: prev.drafted + 1 }))
 
-      // Verifying -> rejected
       timeoutRef.current = setTimeout(() => {
         setPhase("verifying")
-        setCurrentToken(step.rejected.text.trim())
-        emitPacket("verify", "hsl(48, 96%, 53%)")
+        emitPacketForWords("verify", "hsl(48, 96%, 53%)", step.rejected.text)
         setVisibleTokens(prev => {
           const copy = [...prev]
           copy[copy.length - 1] = { ...copy[copy.length - 1], phase: "striking" }
@@ -175,7 +208,6 @@ export function DashboardBody() {
         })
         setCounts(prev => ({ ...prev, rejected: prev.rejected + 1 }))
 
-        // Correcting
         timeoutRef.current = setTimeout(() => {
           setVisibleTokens(prev => {
             const copy = [...prev]
@@ -185,9 +217,8 @@ export function DashboardBody() {
 
           timeoutRef.current = setTimeout(() => {
             setPhase("correcting")
-            setCurrentToken(step.corrected.text.trim())
-            emitPacket("draft", "hsl(217, 91%, 60%)")
-            emitPacket("verify", "hsl(217, 91%, 60%)")
+            emitPacketForWords("draft", "hsl(217, 91%, 60%)", step.corrected.text)
+            emitPacketForWords("verify", "hsl(217, 91%, 60%)", step.corrected.text)
             setVisibleTokens(prev => {
               const withoutHidden = prev.filter(t => t.phase !== "hidden")
               return [...withoutHidden, { text: step.corrected.text, type: "corrected", phase: "appearing" }]
@@ -201,34 +232,185 @@ export function DashboardBody() {
                 return copy
               })
               setPhase("drafting")
-              timeoutRef.current = setTimeout(processStep, ACCEPTED_DELAY)
+              timeoutRef.current = setTimeout(processDemoStep, ACCEPTED_DELAY)
             }, 150)
           }, 100)
         }, STRIKE_PAUSE)
       }, REJECTED_SHOW_DELAY)
     }
-  }, [emitPacket])
+  }, [emitPacketForWords])
 
+  // ── Live streaming mode ──
+  const handleSubmit = useCallback((userPrompt: string) => {
+    // Reset state
+    setPrompt(userPrompt)
+    setVisibleTokens([])
+    setDone(false)
+    setCounts({ accepted: 0, rejected: 0, corrected: 0, drafted: 0 })
+    setPhase("idle")
+    setIsStreaming(true)
+    packetWordBuffer.current = { draft: 0, verify: 0 }
+
+    if (timeoutRef.current) clearTimeout(timeoutRef.current)
+    if (cleanupRef.current) cleanupRef.current()
+
+    // Queue for animating tokens one at a time
+    const tokenQueue: TokenEvent[] = []
+    let processing = false
+
+    function processTokenQueue() {
+      if (tokenQueue.length === 0) {
+        processing = false
+        return
+      }
+      processing = true
+      const token = tokenQueue.shift()!
+
+      // Determine phase/animation based on type
+      if (token.type === "accepted") {
+        setPhase("drafting")
+        emitPacketForWords("draft", "hsl(142, 71%, 45%)", token.text)
+        emitPacketForWords("verify", "hsl(217, 91%, 60%)", token.text)
+        setVisibleTokens(prev => [...prev, { text: token.text, type: "accepted", phase: "settled" }])
+        setCounts(prev => ({ ...prev, drafted: prev.drafted + 1, accepted: prev.accepted + 1 }))
+        setTimeout(processTokenQueue, STREAM_TOKEN_DELAY)
+      } else if (token.type === "rejected") {
+        setPhase("verifying")
+        emitPacketForWords("draft", "hsl(142, 71%, 45%)", token.text)
+        emitPacketForWords("verify", "hsl(48, 96%, 53%)", token.text)
+        setVisibleTokens(prev => [...prev, { text: token.text, type: "rejected", phase: "appearing" }])
+        setCounts(prev => ({ ...prev, drafted: prev.drafted + 1, rejected: prev.rejected + 1 }))
+
+        // Animate strike-through then hide
+        setTimeout(() => {
+          setVisibleTokens(prev => {
+            const copy = [...prev]
+            const last = copy.findLastIndex(t => t.type === "rejected" && t.phase === "appearing")
+            if (last >= 0) copy[last] = { ...copy[last], phase: "striking" }
+            return copy
+          })
+          setTimeout(() => {
+            setVisibleTokens(prev => {
+              const copy = [...prev]
+              const last = copy.findLastIndex(t => t.type === "rejected" && t.phase === "striking")
+              if (last >= 0) copy[last] = { ...copy[last], phase: "hidden" }
+              return copy
+            })
+            setTimeout(() => {
+              setVisibleTokens(prev => prev.filter(t => t.phase !== "hidden"))
+              processTokenQueue()
+            }, 100)
+          }, STRIKE_PAUSE)
+        }, REJECTED_SHOW_DELAY)
+      } else if (token.type === "corrected") {
+        setPhase("correcting")
+        emitPacketForWords("draft", "hsl(217, 91%, 60%)", token.text)
+        emitPacketForWords("verify", "hsl(217, 91%, 60%)", token.text)
+        setVisibleTokens(prev => [...prev, { text: token.text, type: "corrected", phase: "appearing" }])
+        setCounts(prev => ({ ...prev, drafted: prev.drafted + 1, corrected: prev.corrected + 1 }))
+
+        setTimeout(() => {
+          setVisibleTokens(prev => {
+            const copy = [...prev]
+            copy[copy.length - 1] = { ...copy[copy.length - 1], phase: "settled" }
+            return copy
+          })
+          setTimeout(processTokenQueue, STREAM_TOKEN_DELAY)
+        }, 150)
+      }
+    }
+
+    const cleanup = streamInference(
+      { prompt: userPrompt, max_tokens: 64 },
+      (msg: StreamMessage) => {
+        if (msg.type === "token") {
+          tokenQueue.push(msg.data)
+          if (!processing) processTokenQueue()
+        } else if (msg.type === "round") {
+          // Update metrics with round data
+          setAcceptanceRate(msg.data.acceptance_rate * 100)
+        } else if (msg.type === "done") {
+          // Final metrics
+          const data = msg.data
+          setAcceptanceRate(data.acceptance_rate * 100)
+          setCloudSaved(data.acceptance_rate * 100)
+          if (data.generation_time_ms > 0) {
+            setTokensPerSecond(data.total_tokens / (data.generation_time_ms / 1000))
+          }
+          // Mark done after queue drains
+          const checkDone = () => {
+            if (tokenQueue.length === 0 && !processing) {
+              setDone(true)
+              setPhase("complete")
+              setIsStreaming(false)
+            } else {
+              setTimeout(checkDone, 100)
+            }
+          }
+          checkDone()
+        } else if (msg.type === "error") {
+          setDone(true)
+          setPhase("idle")
+          setIsStreaming(false)
+        }
+      },
+      () => {
+        setDone(true)
+        setPhase("idle")
+        setIsStreaming(false)
+      },
+      () => {
+        setIsStreaming(false)
+      },
+    )
+
+    cleanupRef.current = cleanup
+  }, [emitPacketForWords])
+
+  // Start demo on mount if backend is offline
   useEffect(() => {
-    timeoutRef.current = setTimeout(processStep, INITIAL_DELAY)
+    if (backendOnline === false) {
+      packetWordBuffer.current = { draft: 0, verify: 0 }
+      timeoutRef.current = setTimeout(processDemoStep, INITIAL_DELAY)
+    }
     return () => {
       if (timeoutRef.current) clearTimeout(timeoutRef.current)
     }
-  }, [processStep])
+  }, [backendOnline, processDemoStep])
+
+  // Cleanup WebSocket on unmount
+  useEffect(() => {
+    return () => {
+      if (cleanupRef.current) cleanupRef.current()
+    }
+  }, [])
 
   return (
     <div className="flex flex-1 gap-0 overflow-hidden">
       {/* Main content area */}
       <div className="flex flex-1 flex-col overflow-hidden">
-        {/* Network visualizer strip -- synced to chat phase */}
+        {/* Network visualizer strip */}
         <div className="shrink-0 border-b border-border/30 px-4 py-3">
           <NetworkVisualizer phase={phase} packets={packets} onPacketDone={handlePacketDone} />
         </div>
 
+        {/* Connection status */}
+        {backendOnline !== null && (
+          <div className="flex items-center gap-2 border-b border-border/20 px-4 py-1.5">
+            <span className={`inline-block h-1.5 w-1.5 rounded-full ${backendOnline ? "bg-green-500" : "bg-yellow-500"}`} />
+            <span className="text-[10px] text-muted-foreground">
+              {backendOnline ? "Connected to SpecNet backend" : "Demo mode — backend offline"}
+            </span>
+          </div>
+        )}
+
         {/* Chat area */}
         <div className="flex flex-1 flex-col gap-3 overflow-hidden p-4">
-          <ChatPanel tokens={visibleTokens} done={done} counts={counts} />
-          <ChatInput />
+          <ChatPanel prompt={prompt} tokens={visibleTokens} done={done} counts={counts} />
+          <ChatInput
+            onSubmit={handleSubmit}
+            disabled={isStreaming || (!backendOnline && !done)}
+          />
         </div>
       </div>
 
@@ -268,7 +450,11 @@ export function DashboardBody() {
                   <span className="relative inline-flex h-2 w-2 rounded-full bg-green-500" />
                 </span>
               </div>
-              <LiveMetrics />
+              <LiveMetrics
+                acceptanceRate={acceptanceRate}
+                tokensPerSecond={tokensPerSecond}
+                cloudSaved={cloudSaved}
+              />
             </div>
           </motion.aside>
         )}

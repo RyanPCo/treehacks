@@ -5,8 +5,9 @@ import { motion } from "framer-motion"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Server, ChevronDown } from "lucide-react"
+import type { NodeInfo } from "@/lib/types"
 
-const TARGET_NODES = [
+const DEFAULT_TARGET_NODES = [
   { provider: "Lambda Cloud", gpu: "H100 SXM5", vram: "80 GB", price: 2.49, premium: true },
   { provider: "CoreWeave", gpu: "H100 SXM5", vram: "80 GB", price: 2.23, premium: true },
   { provider: "RunPod", gpu: "H100 PCIe", vram: "80 GB", price: 2.69, premium: true },
@@ -19,12 +20,28 @@ const TARGET_NODES = [
 
 const GPU_TYPES = ["All GPUs", "H100 SXM5", "H100 PCIe", "A100 SXM4", "A100 PCIe", "A10G", "L40S"]
 
-export function TargetNodesTable() {
+interface TargetNodesTableProps {
+  nodes?: NodeInfo[]
+}
+
+export function TargetNodesTable({ nodes: liveNodes }: TargetNodesTableProps) {
   const [gpuFilter, setGpuFilter] = useState("All GPUs")
+
+  // Map live NodeInfo[] to table format, or use defaults
+  const TARGET_NODES = useMemo(() => {
+    if (!liveNodes) return DEFAULT_TARGET_NODES
+    return liveNodes.map(n => ({
+      provider: n.hardware,
+      gpu: n.model,
+      vram: n.gpu_memory,
+      price: n.price,
+      premium: n.price > 2.0,
+    }))
+  }, [liveNodes])
 
   const filtered = useMemo(
     () => (gpuFilter === "All GPUs" ? TARGET_NODES : TARGET_NODES.filter((n) => n.gpu === gpuFilter)),
-    [gpuFilter]
+    [gpuFilter, TARGET_NODES]
   )
 
   return (

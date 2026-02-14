@@ -8,6 +8,7 @@ import sys
 import os
 from vllm import LLM, SamplingParams
 import time
+import torch
 
 # Add proto directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'proto'))
@@ -22,14 +23,36 @@ from verification_strategies import get_strategy
 
 
 class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceServicer):
-    def __init__(self, model_name="Qwen/Qwen2.5-3B-Instruct", strategy="deterministic", strategy_kwargs=None):
+    def __init__(
+        self,
+        model_name="Qwen/Qwen2.5-0.5B-Instruct",
+        strategy="deterministic",
+        strategy_kwargs=None,
+        gpu_memory_utilization=0.98,
+        max_model_len=1024,
+        max_num_seqs=2,
+        enforce_eager=True,
+    ):
         print(f"Initializing verification service with model: {model_name}")
         print(f"Using verification strategy: {strategy}")
+        if torch.cuda.is_available():
+            free_bytes, total_bytes = torch.cuda.mem_get_info(0)
+            free_ratio = free_bytes / total_bytes
+            # Keep a small safety margin to avoid startup failures from minor memory drift.
+            safe_utilization = max(0.5, min(gpu_memory_utilization, free_ratio - 0.02))
+            if safe_utilization < gpu_memory_utilization:
+                print(
+                    f"Adjusting gpu_memory_utilization from {gpu_memory_utilization:.2f} "
+                    f"to {safe_utilization:.2f} based on current free VRAM."
+                )
+            gpu_memory_utilization = safe_utilization
 
         self.llm = LLM(
             model=model_name,
-            gpu_memory_utilization=0.8,  # Adjusted for 3B model
-            max_model_len=4096,  # Llama supports longer context
+            gpu_memory_utilization=gpu_memory_utilization,
+            max_model_len=max_model_len,
+            max_num_seqs=max_num_seqs,
+            enforce_eager=enforce_eager,
         )
 
         # Load tokenizer for decoding
@@ -173,13 +196,26 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
                 pass
 
 
-def serve(port=50051, strategy="deterministic", strategy_kwargs=None, model_name="Qwen/Qwen2.5-3B-Instruct"):
+def serve(
+    port=50051,
+    strategy="deterministic",
+    strategy_kwargs=None,
+    model_name="Qwen/Qwen2.5-0.5B-Instruct",
+    gpu_memory_utilization=0.98,
+    max_model_len=1024,
+    max_num_seqs=2,
+    enforce_eager=True,
+):
     """Start the verification service gRPC server"""
     server = grpc.server(futures.ThreadPoolExecutor(max_workers=10))
     servicer = VerificationServiceImpl(
         model_name=model_name,
         strategy=strategy,
         strategy_kwargs=strategy_kwargs,
+        gpu_memory_utilization=gpu_memory_utilization,
+        max_model_len=max_model_len,
+        max_num_seqs=max_num_seqs,
+        enforce_eager=enforce_eager,
     )
     speculative_decoding_pb2_grpc.add_VerificationServiceServicer_to_server(servicer, server)
 
@@ -190,6 +226,10 @@ def serve(port=50051, strategy="deterministic", strategy_kwargs=None, model_name
     print(f"🎯 Verification Service (Target Node) started on port {port}")
     print(f"   Model: {model_name}")
     print(f"   Strategy: {strategy}")
+    print(f"   gpu_memory_utilization: {gpu_memory_utilization}")
+    print(f"   max_model_len: {max_model_len}")
+    print(f"   max_num_seqs: {max_num_seqs}")
+    print(f"   enforce_eager: {enforce_eager}")
     if strategy_kwargs:
         print(f"   Strategy params: {strategy_kwargs}")
     print(f"   Ready to verify draft tokens from draft nodes")
@@ -207,8 +247,8 @@ if __name__ == '__main__':
 
     parser = argparse.ArgumentParser(description='Target Node Verification Service')
     parser.add_argument('--port', type=int, default=50051, help='Port to listen on')
-    parser.add_argument('--model', type=str, default='Qwen/Qwen2.5-3B-Instruct',
-                        help='Target model to use (default: Qwen/Qwen2.5-3B-Instruct)')
+    parser.add_argument('--model', type=str, default='Qwen/Qwen2.5-0.5B-Instruct',
+                        help='Target model to use (default: Qwen/Qwen2.5-0.5B-Instruct)')
     parser.add_argument('--strategy', type=str, default='deterministic',
                         choices=['deterministic', 'probabilistic', 'threshold', 'greedy'],
                         help='Verification strategy to use')
@@ -216,6 +256,14 @@ if __name__ == '__main__':
                         help='Threshold for threshold strategy (default: 0.1)')
     parser.add_argument('--verbose', action='store_true',
                         help='Enable verbose logging in verification')
+    parser.add_argument('--gpu-memory-utilization', type=float, default=0.98,
+                        help='Fraction of GPU memory budget for vLLM (default: 0.98)')
+    parser.add_argument('--max-model-len', type=int, default=1024,
+                        help='Maximum context length for KV cache sizing (default: 1024)')
+    parser.add_argument('--max-num-seqs', type=int, default=2,
+                        help='Maximum concurrent sequences (default: 2)')
+    parser.add_argument('--no-enforce-eager', action='store_true',
+                        help='Disable enforce_eager (may use more memory)')
 
     args = parser.parse_args()
 
@@ -224,4 +272,13 @@ if __name__ == '__main__':
     if args.strategy == 'threshold':
         strategy_kwargs['threshold'] = args.threshold
 
-    serve(port=args.port, strategy=args.strategy, strategy_kwargs=strategy_kwargs, model_name=args.model)
+    serve(
+        port=args.port,
+        strategy=args.strategy,
+        strategy_kwargs=strategy_kwargs,
+        model_name=args.model,
+        gpu_memory_utilization=args.gpu_memory_utilization,
+        max_model_len=args.max_model_len,
+        max_num_seqs=args.max_num_seqs,
+        enforce_eager=not args.no_enforce_eager,
+    )

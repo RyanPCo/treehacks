@@ -14,7 +14,17 @@ const cardVariants = {
   }),
 }
 
-export function LiveMetrics() {
+interface LiveMetricsProps {
+  acceptanceRate?: number  // 0-100
+  tokensPerSecond?: number
+  cloudSaved?: number      // 0-100
+}
+
+export function LiveMetrics({
+  acceptanceRate = 82,
+  tokensPerSecond = 145,
+  cloudSaved = 60,
+}: LiveMetricsProps) {
   return (
     <div className="flex flex-col gap-3">
       <motion.div custom={0} initial="hidden" animate="visible" variants={cardVariants}>
@@ -27,10 +37,10 @@ export function LiveMetrics() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">82%</span>
+              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">{Math.round(acceptanceRate)}%</span>
               <span className="text-xs text-muted-foreground">of draft tokens accepted</span>
             </div>
-            <Progress value={82} className="mt-3 h-2" />
+            <Progress value={acceptanceRate} className="mt-3 h-2" />
           </CardContent>
         </Card>
       </motion.div>
@@ -45,12 +55,15 @@ export function LiveMetrics() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">145</span>
+              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">{Math.round(tokensPerSecond)}</span>
               <span className="text-xs text-muted-foreground">tokens / second</span>
             </div>
             <div className="mt-3 flex items-center gap-1.5">
               <div className="h-1.5 flex-1 rounded-full bg-secondary">
-                <div className="h-full w-[72%] rounded-full bg-yellow-400/80" />
+                <div
+                  className="h-full rounded-full bg-yellow-400/80 transition-all duration-500"
+                  style={{ width: `${Math.min(100, (tokensPerSecond / 200) * 100)}%` }}
+                />
               </div>
               <span className="text-[10px] text-muted-foreground">vs 40 TPS baseline</span>
             </div>
@@ -68,10 +81,10 @@ export function LiveMetrics() {
           </CardHeader>
           <CardContent>
             <div className="flex items-baseline gap-2">
-              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">60%</span>
+              <span className="font-heading text-3xl font-bold tracking-tight text-foreground">{Math.round(cloudSaved)}%</span>
               <span className="text-xs text-muted-foreground">reduction in cloud calls</span>
             </div>
-            <Progress value={60} className="mt-3 h-2 [&>[data-state]]:bg-blue-500" />
+            <Progress value={cloudSaved} className="mt-3 h-2 [&>[data-state]]:bg-blue-500" />
           </CardContent>
         </Card>
       </motion.div>

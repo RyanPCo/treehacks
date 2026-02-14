@@ -12,12 +12,13 @@ export interface VisibleToken {
 }
 
 interface ChatPanelProps {
+  prompt: string
   tokens: VisibleToken[]
   done: boolean
   counts: { accepted: number; rejected: number; corrected: number; drafted: number }
 }
 
-export function ChatPanel({ tokens, done, counts }: ChatPanelProps) {
+export function ChatPanel({ prompt, tokens, done, counts }: ChatPanelProps) {
   const scrollRef = useRef<HTMLDivElement>(null)
 
   const setRef = useCallback(
@@ -70,44 +71,46 @@ export function ChatPanel({ tokens, done, counts }: ChatPanelProps) {
             <div className="flex flex-col gap-1">
               <span className="font-heading text-[11px] font-medium text-muted-foreground">You</span>
               <p className="text-sm leading-relaxed text-foreground">
-                Explain the theory of relativity.
+                {prompt}
               </p>
             </div>
           </motion.div>
 
           {/* AI response */}
-          <motion.div
-            className="flex gap-3"
-            initial={{ opacity: 0, y: 8 }}
-            animate={{ opacity: 1, y: 0 }}
-            transition={{ duration: 0.3, delay: 0.2 }}
-          >
-            <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
-              <Bot className="h-3.5 w-3.5 text-primary" />
-            </div>
-            <div className="flex min-w-0 flex-1 flex-col gap-1">
-              <span className="font-heading text-[11px] font-medium text-muted-foreground">SpecNet</span>
-              <div className="rounded-lg bg-secondary/40 p-3">
-                <p className="font-mono text-sm leading-relaxed">
-                  <AnimatePresence mode="popLayout">
-                    {tokens.map((vt, i) => (
-                      <TokenSpan key={`${i}-${vt.text}-${vt.type}`} token={vt} />
-                    ))}
-                  </AnimatePresence>
-                  {!done && (
-                    <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-foreground align-middle" />
-                  )}
-                </p>
+          {tokens.length > 0 && (
+            <motion.div
+              className="flex gap-3"
+              initial={{ opacity: 0, y: 8 }}
+              animate={{ opacity: 1, y: 0 }}
+              transition={{ duration: 0.3, delay: 0.2 }}
+            >
+              <div className="flex h-7 w-7 shrink-0 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
+                <Bot className="h-3.5 w-3.5 text-primary" />
               </div>
-              {/* Inline counters */}
-              <div className="flex items-center gap-4 pt-1 text-[10px] tabular-nums text-muted-foreground">
-                <span>{counts.drafted} drafted</span>
-                <span className="text-green-400">{counts.accepted} accepted</span>
-                <span className="text-red-500">{counts.rejected} rejected</span>
-                <span className="text-blue-400">{counts.corrected} corrected</span>
+              <div className="flex min-w-0 flex-1 flex-col gap-1">
+                <span className="font-heading text-[11px] font-medium text-muted-foreground">SpecNet</span>
+                <div className="rounded-lg bg-secondary/40 p-3">
+                  <p className="font-mono text-sm leading-relaxed">
+                    <AnimatePresence mode="popLayout">
+                      {tokens.map((vt, i) => (
+                        <TokenSpan key={`${i}-${vt.text}-${vt.type}`} token={vt} />
+                      ))}
+                    </AnimatePresence>
+                    {!done && (
+                      <span className="ml-0.5 inline-block h-4 w-[2px] animate-pulse bg-foreground align-middle" />
+                    )}
+                  </p>
+                </div>
+                {/* Inline counters */}
+                <div className="flex items-center gap-4 pt-1 text-[10px] tabular-nums text-muted-foreground">
+                  <span>{counts.drafted} drafted</span>
+                  <span className="text-green-400">{counts.accepted} accepted</span>
+                  <span className="text-red-500">{counts.rejected} rejected</span>
+                  <span className="text-blue-400">{counts.corrected} corrected</span>
+                </div>
               </div>
-            </div>
-          </motion.div>
+            </motion.div>
+          )}
         </div>
       </ScrollArea>
     </div>

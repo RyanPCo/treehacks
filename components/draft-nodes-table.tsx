@@ -5,8 +5,9 @@ import { motion } from "framer-motion"
 import { Card, CardContent, CardHeader, CardTitle } from "@/components/ui/card"
 import { Badge } from "@/components/ui/badge"
 import { Cpu, ChevronDown } from "lucide-react"
+import type { NodeInfo } from "@/lib/types"
 
-const DRAFT_NODES = [
+const DEFAULT_DRAFT_NODES = [
   { id: "node_7x9b", hardware: "RTX 3060", latency: 45, price: 0.05 },
   { id: "node_a2f1", hardware: "RTX 3070", latency: 32, price: 0.07 },
   { id: "node_k4c8", hardware: "Mac M2", latency: 58, price: 0.04 },
@@ -22,6 +23,10 @@ const DRAFT_NODES = [
 const HARDWARE_TYPES = ["All Hardware", "RTX 3060", "RTX 3070", "RTX 3080", "RTX 4060", "RTX 4070", "Mac M1 Pro", "Mac M2", "Mac M3", "RX 7600"]
 const LATENCY_OPTIONS = ["Any Latency", "< 30ms", "< 50ms", "< 75ms"]
 
+interface DraftNodesTableProps {
+  nodes?: NodeInfo[]
+}
+
 function PulsingDot() {
   return (
     <span className="relative flex h-2 w-2">
@@ -31,9 +36,20 @@ function PulsingDot() {
   )
 }
 
-export function DraftNodesTable() {
+export function DraftNodesTable({ nodes: liveNodes }: DraftNodesTableProps) {
   const [hardwareFilter, setHardwareFilter] = useState("All Hardware")
   const [latencyFilter, setLatencyFilter] = useState("Any Latency")
+
+  // Map live NodeInfo[] to the table format, or use defaults
+  const DRAFT_NODES = useMemo(() => {
+    if (!liveNodes) return DEFAULT_DRAFT_NODES
+    return liveNodes.map(n => ({
+      id: n.id,
+      hardware: n.hardware,
+      latency: n.latency,
+      price: n.price,
+    }))
+  }, [liveNodes])
 
   const filtered = useMemo(() => {
     let nodes = DRAFT_NODES
@@ -45,7 +61,7 @@ export function DraftNodesTable() {
       nodes = nodes.filter((n) => n.latency < max)
     }
     return nodes
-  }, [hardwareFilter, latencyFilter])
+  }, [hardwareFilter, latencyFilter, DRAFT_NODES])
 
   return (
     <motion.div initial={{ opacity: 0, y: 20 }} animate={{ opacity: 1, y: 0 }} transition={{ delay: 0.4, duration: 0.5 }}>

@@ -8,7 +8,7 @@
 #   ./start_target_server.sh --verbose                # Enable verbose logging
 
 cd "$(dirname "$0")/target_node"
-source /home/dgorb/Github/treehacks/.venv/bin/activate
+source /home/ryan/Code/treehacks/.venv/bin/activate
 
 echo "Starting target model server..."
 python server.py "$@"

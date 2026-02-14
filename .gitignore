@@ -1,9 +1,35 @@
-.venv/
+# OS/editor
+.DS_Store
 .vscode/
-.python-version
-logs/
 
-# Python cache
-*/__pycache__/*
-*.pyc
+# Local env/config
+.env
+.env.*
+!.env.example
+.python-version
+
+# Logs
+logs/
+*.log
+
+# Python
+.venv/
+venv/
+__pycache__/
+**/__pycache__/
+*.py[cod]
+*.pyo
+*.pyd
+.pytest_cache/
+.mypy_cache/
+
+# Next.js / Node
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.tsbuildinfo
+
+# Project-specific generated files
 setup/*
