@@ -3,11 +3,12 @@
 import Link from "next/link"
 import { usePathname } from "next/navigation"
 import { Badge } from "@/components/ui/badge"
-import { Network, Globe } from "lucide-react"
+import { Network, Globe, Wallet } from "lucide-react"
 
 const NAV_ITEMS = [
   { href: "/", label: "Dashboard", icon: Network },
   { href: "/network", label: "Network Explorer", icon: Globe },
+  { href: "/provider", label: "Provider Earnings", icon: Wallet },
 ]
 
 function Nav() {
