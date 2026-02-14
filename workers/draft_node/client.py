@@ -1,46 +1,51 @@
 """
 Draft Node - DraftNodeService Implementation
-Generates draft tokens and coordinates with verification service.
+Generates draft tokens and coordinates with Modal verification service.
 """
-import grpc
+import modal
 import sys
 import os
 from vllm import LLM, SamplingParams
 import time
+from dataclasses import dataclass
 
 # Add proto directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'proto'))
 
-# Import generated protobuf code
 import common_pb2
 import speculative_decoding_pb2
-import speculative_decoding_pb2_grpc
+
+
+@dataclass
+class Token:
+    token_id: int
+    text: str
+    logprob: float
 
 
 class DraftNodeClient:
     def __init__(
         self,
-        draft_model="Qwen/Qwen2.5-1.5B-Instruct",  # Match Qwen family for target
-        verification_server="100.82.221.67:50",
+        draft_model="Qwen/Qwen2.5-1.5B-Instruct",
         num_draft_tokens=5,
     ):
         print(f"Initializing draft node with model: {draft_model}")
         self.llm = LLM(
             model=draft_model,
-            gpu_memory_utilization=0.3,  # Adjusted for Llama
-            max_model_len=4096,  # Match target context length
+            gpu_memory_utilization=0.3,
+            max_model_len=4096,
         )
 
         self.num_draft_tokens = num_draft_tokens
 
-        # Load tokenizer
         from transformers import AutoTokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(draft_model)
 
-        # Connect to verification service
-        print(f"Connecting to verification service at {verification_server}")
-        self.channel = grpc.insecure_channel(verification_server)
-        self.verification_stub = speculative_decoding_pb2_grpc.VerificationServiceStub(self.channel)
+        # Connect to Modal verification service
+        print("Connecting to Modal verification service...")
+        self.verification_service = modal.Cls.from_name(
+            "treehacks-verification-service", "VerificationService"
+        )()
 
         print("Draft node ready!")
 
@@ -77,7 +82,7 @@ class DraftNodeClient:
                 eos_token_ids.add(self.tokenizer.convert_tokens_to_ids(token))
 
         print(f"\n{'='*80}")
-        print(f"🚀 Starting inference for request: {request.request_id}")
+        print(f"Starting inference for request: {request.request_id}")
         print(f"   Prompt: {request.prompt!r}")
         print(f"   Max tokens: {max_tokens}")
         print(f"   Draft tokens/round: {draft_tokens_per_round}")
@@ -94,8 +99,8 @@ class DraftNodeClient:
                 top_k=request.params.top_k if request.params.top_k > 0 else -1,
                 top_p=0.95,
                 max_tokens=num_to_draft,
-                logprobs=5,  # Get more logprobs
-                seed=42,  # Same seed as target for testing
+                logprobs=5,
+                seed=42,
             )
 
             draft_start = time.time()
@@ -125,41 +130,39 @@ class DraftNodeClient:
             print(f"  Round {speculation_rounds}: Drafted {len(draft_token_ids)} tokens in {draft_time:.1f}ms")
             print(f"    Draft: {draft_text!r}")
 
-            # Step 2: Send to verification service
+            # Step 2: Send to Modal verification service
             try:
-                verify_request = speculative_decoding_pb2.VerificationRequest(
+                verify_response = self.verification_service.verify_draft.remote(
                     request_id=request.request_id,
-                    session_id="session-0",  # Could implement session management
-                    prefix_token_ids=current_token_ids,
-                    draft_token_ids=draft_token_ids,
-                    draft_logprobs=draft_logprobs,
+                    session_id="session-0",
+                    prefix_token_ids=list(current_token_ids),
+                    draft_token_ids=list(draft_token_ids),
+                    draft_logprobs=list(draft_logprobs),
                     temperature=request.params.temperature if request.params.temperature > 0 else 0.8,
                     top_k=request.params.top_k if request.params.top_k > 0 else -1,
                 )
 
-                verify_response = self.verification_stub.VerifyDraft(verify_request)
-
-                num_accepted = verify_response.num_accepted_tokens
+                num_accepted = verify_response["num_accepted_tokens"]
                 total_draft_accepted += num_accepted
 
-                print(f"    Verified: {num_accepted}/{len(draft_token_ids)} accepted ({verify_response.acceptance_rate:.1%})")
+                print(f"    Verified: {num_accepted}/{len(draft_token_ids)} accepted ({verify_response['acceptance_rate']:.1%})")
 
                 # Accept the verified tokens
                 accepted_tokens = draft_token_ids[:num_accepted]
                 current_token_ids.extend(accepted_tokens)
 
                 # Add corrected token if any
-                if verify_response.corrected_token_ids:
-                    current_token_ids.extend(verify_response.corrected_token_ids)
-                    print(f"    Corrected: +{len(verify_response.corrected_token_ids)} tokens from target")
+                if verify_response["corrected_token_ids"]:
+                    current_token_ids.extend(verify_response["corrected_token_ids"])
+                    print(f"    Corrected: +{len(verify_response['corrected_token_ids'])} tokens from target")
 
                 # Add to result
                 eos_reached = False
                 for token_id in accepted_tokens:
-                    token = common_pb2.Token(
+                    token = Token(
                         token_id=token_id,
                         text=self.tokenizer.decode([token_id]),
-                        logprob=0.0,  # Could track this
+                        logprob=0.0,
                     )
                     all_tokens.append(token)
                     if eos_token_ids and token_id in eos_token_ids:
@@ -167,11 +170,12 @@ class DraftNodeClient:
                         break
 
                 if not eos_reached:
-                    for i, token_id in enumerate(verify_response.corrected_token_ids):
-                        token = common_pb2.Token(
+                    for i, token_id in enumerate(verify_response["corrected_token_ids"]):
+                        corrected_logprobs = verify_response["corrected_logprobs"]
+                        token = Token(
                             token_id=token_id,
                             text=self.tokenizer.decode([token_id]),
-                            logprob=verify_response.corrected_logprobs[i] if i < len(verify_response.corrected_logprobs) else 0.0,
+                            logprob=corrected_logprobs[i] if i < len(corrected_logprobs) else 0.0,
                         )
                         all_tokens.append(token)
                         if eos_token_ids and token_id in eos_token_ids:
@@ -179,18 +183,17 @@ class DraftNodeClient:
                             break
 
                 # Check next_token_id from target (when all draft tokens accepted)
-                if not eos_reached and eos_token_ids and verify_response.next_token_id in eos_token_ids:
-                    token = common_pb2.Token(
-                        token_id=verify_response.next_token_id,
-                        text=self.tokenizer.decode([verify_response.next_token_id]),
-                        logprob=verify_response.next_token_logprob if verify_response.next_token_logprob else 0.0,
+                if not eos_reached and eos_token_ids and verify_response["next_token_id"] in eos_token_ids:
+                    token = Token(
+                        token_id=verify_response["next_token_id"],
+                        text=self.tokenizer.decode([verify_response["next_token_id"]]),
+                        logprob=verify_response["next_token_logprob"] or 0.0,
                     )
                     all_tokens.append(token)
-                    current_token_ids.append(verify_response.next_token_id)
+                    current_token_ids.append(verify_response["next_token_id"])
                     eos_reached = True
 
                 if eos_reached:
-                    # Truncate current_token_ids to remove any tokens after EOS
                     eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
                     if eos_idx is not None:
                         current_token_ids = current_token_ids[:eos_idx + 1]
@@ -200,11 +203,8 @@ class DraftNodeClient:
                 # Update current text
                 current_text = self.tokenizer.decode(current_token_ids, skip_special_tokens=True)
 
-            except grpc.RpcError as e:
-                print(f"❌ gRPC error: {e}")
-                break
             except Exception as e:
-                print(f"❌ Error during verification: {e}")
+                print(f"Error during verification: {e}")
                 import traceback
                 traceback.print_exc()
                 break
@@ -215,7 +215,7 @@ class DraftNodeClient:
         acceptance_rate = total_draft_accepted / total_draft_generated if total_draft_generated > 0 else 0.0
 
         print(f"\n{'='*80}")
-        print(f"✅ Inference complete!")
+        print(f"Inference complete!")
         print(f"   Total tokens: {len(all_tokens)}")
         print(f"   Draft generated: {total_draft_generated}")
         print(f"   Draft accepted: {total_draft_accepted} ({acceptance_rate:.1%})")
@@ -227,7 +227,7 @@ class DraftNodeClient:
         response = speculative_decoding_pb2.InferenceJobResponse(
             request_id=request.request_id,
             generated_text=final_text,
-            tokens=all_tokens,
+            tokens=[common_pb2.Token(token_id=t.token_id, text=t.text, logprob=t.logprob) for t in all_tokens],
             status=common_pb2.STATUS_SUCCESS,
             total_tokens=len(all_tokens),
             draft_tokens_generated=total_draft_generated,
@@ -241,8 +241,6 @@ class DraftNodeClient:
 
     def __del__(self):
         """Cleanup"""
-        if hasattr(self, 'channel'):
-            self.channel.close()
         if hasattr(self, 'llm'):
             try:
                 del self.llm.llm_engine
@@ -254,12 +252,11 @@ class DraftNodeClient:
 def main():
     """Example usage"""
     print("\n" + "="*80)
-    print("📝 Draft Node Client - Speculative Decoding Demo")
+    print("Draft Node Client - Speculative Decoding Demo")
     print("="*80 + "\n")
 
     client = DraftNodeClient()
 
-    # Create test requests
     test_prompts = [
         "Hello, my name is",
         "The president of the United States is",
@@ -268,7 +265,6 @@ def main():
     ]
 
     for prompt in test_prompts:
-        # Create inference request
         request = speculative_decoding_pb2.InferenceJobRequest(
             request_id=f"req-{hash(prompt) % 10000}",
             prompt=prompt,
@@ -278,20 +274,19 @@ def main():
                 top_k=50,
                 draft_tokens=5,
             ),
-            model_id="meta-llama/Llama-3.2-3B",
+            model_id="Qwen/Qwen2.5-0.5B",
             timestamp=int(time.time() * 1000),
         )
 
-        # Execute inference
         response = client.execute_inference(request)
 
-        print(f"\n📊 Final Stats:")
+        print(f"\nFinal Stats:")
         print(f"   Status: {common_pb2.StatusCode.Name(response.status)}")
         print(f"   Acceptance Rate: {response.acceptance_rate:.1%}")
         print(f"   Speed: {response.total_tokens / (response.generation_time_ms/1000):.1f} tokens/sec")
         print("\n" + "-"*80 + "\n")
 
-        time.sleep(1)  # Small delay between requests
+        time.sleep(1)
 
 
 if __name__ == '__main__':
