@@ -334,9 +334,12 @@ def run_benchmark(
         if count > 0:
             print(f"   {label}: {count} questions ({count/len(results)*100:.1f}%)")
 
-    # Save results to file
+    # Save results to logs folder
+    script_dir = os.path.dirname(os.path.abspath(__file__))
+    logs_dir = os.path.join(script_dir, "logs")
+    os.makedirs(logs_dir, exist_ok=True)
     output_prefix = "humaneval" if humaneval else "gsm8k"
-    output_file = f"{output_prefix}_benchmark_{int(time.time())}.json"
+    output_file = os.path.join(logs_dir, f"{output_prefix}_benchmark_{int(time.time())}.json")
     with open(output_file, 'w') as f:
         json.dump({
             'config': {
