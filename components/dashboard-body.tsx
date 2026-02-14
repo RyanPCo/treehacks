@@ -114,6 +114,8 @@ const INITIAL_DELAY = 800
 // Token animation delay for live streaming
 const STREAM_TOKEN_DELAY = 20
 const WORDS_PER_PACKET = 3
+const ESTIMATED_CLOUD_COST_PER_1K_TOKENS_USD = 0.5
+const ESTIMATED_TIME_SAVED_PER_ACCEPTED_TOKEN_MS = 12
 
 function countWords(text: string): number {
   return text.trim().split(/\s+/).filter(Boolean).length
@@ -134,11 +136,14 @@ export function DashboardBody() {
 
   // Metrics from backend
   const [acceptanceRate, setAcceptanceRate] = useState(82)
-  const [tokensPerSecond, setTokensPerSecond] = useState(145)
-  const [cloudSaved, setCloudSaved] = useState(60)
+  const [totalInferenceTimeSavedMs, setTotalInferenceTimeSavedMs] = useState(320)
+  const [costSavingsDollars, setCostSavingsDollars] = useState(0.42)
 
   const packetId = useRef(0)
   const packetWordBuffer = useRef<{ draft: number; verify: number }>({ draft: 0, verify: 0 })
+  const streamStartMs = useRef(0)
+  const generatedOutputTokens = useRef(0)
+  const acceptedDraftTokens = useRef(0)
   const stepIdx = useRef(0)
   const timeoutRef = useRef<ReturnType<typeof setTimeout> | null>(null)
   const cleanupRef = useRef<(() => void) | null>(null)
@@ -249,7 +254,12 @@ export function DashboardBody() {
     setCounts({ accepted: 0, rejected: 0, corrected: 0, drafted: 0 })
     setPhase("idle")
     setIsStreaming(true)
+    setTotalInferenceTimeSavedMs(0)
+    setCostSavingsDollars(0)
     packetWordBuffer.current = { draft: 0, verify: 0 }
+    streamStartMs.current = Date.now()
+    generatedOutputTokens.current = 0
+    acceptedDraftTokens.current = 0
 
     if (timeoutRef.current) clearTimeout(timeoutRef.current)
     if (cleanupRef.current) cleanupRef.current()
@@ -320,10 +330,26 @@ export function DashboardBody() {
       }
     }
 
+    function updateLiveSavingsFromAcceptedTokens() {
+      const liveSavedMs = acceptedDraftTokens.current * ESTIMATED_TIME_SAVED_PER_ACCEPTED_TOKEN_MS
+      const liveSavingsDollars =
+        (acceptedDraftTokens.current / 1000) * ESTIMATED_CLOUD_COST_PER_1K_TOKENS_USD
+      setTotalInferenceTimeSavedMs(liveSavedMs)
+      setCostSavingsDollars(liveSavingsDollars)
+    }
+
     const cleanup = streamInference(
       { prompt: userPrompt, max_tokens: 64 },
       (msg: StreamMessage) => {
         if (msg.type === "token") {
+          if (msg.data.type === "accepted") {
+            acceptedDraftTokens.current += 1
+            updateLiveSavingsFromAcceptedTokens()
+          }
+
+          if (msg.data.type === "accepted" || msg.data.type === "corrected") {
+            generatedOutputTokens.current += 1
+          }
           tokenQueue.push(msg.data)
           if (!processing) processTokenQueue()
         } else if (msg.type === "round") {
@@ -333,10 +359,8 @@ export function DashboardBody() {
           // Final metrics
           const data = msg.data
           setAcceptanceRate(data.acceptance_rate * 100)
-          setCloudSaved(data.acceptance_rate * 100)
-          if (data.generation_time_ms > 0) {
-            setTokensPerSecond(data.total_tokens / (data.generation_time_ms / 1000))
-          }
+          acceptedDraftTokens.current = data.draft_tokens_accepted
+          updateLiveSavingsFromAcceptedTokens()
           // Mark done after queue drains
           const checkDone = () => {
             if (tokenQueue.length === 0 && !processing) {
@@ -452,8 +476,8 @@ export function DashboardBody() {
               </div>
               <LiveMetrics
                 acceptanceRate={acceptanceRate}
-                tokensPerSecond={tokensPerSecond}
-                cloudSaved={cloudSaved}
+                totalInferenceTimeSavedMs={totalInferenceTimeSavedMs}
+                costSavingsDollars={costSavingsDollars}
               />
             </div>
           </motion.aside>

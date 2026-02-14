@@ -13,7 +13,7 @@ export function TotalEarningsCard() {
     >
       <Card className="border-border/50 bg-card/50 backdrop-blur-sm">
         <CardContent className="p-6">
-          <div className="flex items-start justify-between">
+          <div className="flex items-start">
             <div>
               <div className="flex items-center gap-2">
                 <div className="flex h-9 w-9 items-center justify-center rounded-lg bg-primary/10 ring-1 ring-primary/20">
@@ -32,12 +32,6 @@ export function TotalEarningsCard() {
                   +12% vs last week
                 </span>
               </div>
-            </div>
-            <div className="hidden flex-col items-end gap-1 text-right sm:flex">
-              <p className="text-xs text-muted-foreground">Projected this month</p>
-              <span className="font-heading text-lg font-semibold text-foreground/70">
-                ~$58.00
-              </span>
             </div>
           </div>
         </CardContent>
