@@ -17,13 +17,18 @@ import common_pb2
 import speculative_decoding_pb2
 import speculative_decoding_pb2_grpc
 
+# Import verification strategies
+from verification_strategies import get_strategy
+
 
 class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceServicer):
-    def __init__(self, model_name="facebook/opt-6.7b"):
+    def __init__(self, model_name="facebook/opt-1.3b", strategy="deterministic", strategy_kwargs=None):
         print(f"Initializing verification service with model: {model_name}")
+        print(f"Using verification strategy: {strategy}")
+
         self.llm = LLM(
             model=model_name,
-            gpu_memory_utilization=0.6,
+            gpu_memory_utilization=0.4,  # Reduced memory usage
             max_model_len=2048,
         )
 
@@ -31,10 +36,22 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
         from transformers import AutoTokenizer
         self.tokenizer = AutoTokenizer.from_pretrained(model_name)
 
-        print("Verification service ready!")
+        # Initialize verification strategy
+        strategy_kwargs = strategy_kwargs or {}
+        self.verification_strategy = get_strategy(strategy, **strategy_kwargs)
+
+        print(f"Verification service ready with {strategy} strategy!")
 
     def VerifyDraft(self, request, context):
-        """Verify draft tokens with the powerful model"""
+        """
+        Verify draft tokens with the powerful model using probabilistic acceptance.
+
+        Implements the speculative decoding algorithm from SLED paper:
+        A draft token x̃ is accepted with probability:
+            α = min(1, p_target(x̃) / p_draft(x̃))
+
+        This ensures the output distribution matches the target model exactly.
+        """
         start_time = time.time()
 
         try:
@@ -59,12 +76,17 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
                 )
 
             # Generate tokens with the target model
+            # Use SAME parameters as draft to maximize agreement
             sampling_params = SamplingParams(
-                temperature=request.temperature,
+                temperature=request.temperature if request.temperature > 0 else 0.8,
                 top_k=request.top_k if request.top_k > 0 else -1,
+                top_p=0.95,  # Match draft default
                 max_tokens=num_draft_tokens + 1,  # Generate one extra for next token
-                logprobs=1,
+                logprobs=5,  # Get more logprobs for better probability estimates
+                seed=42,  # Fixed seed for reproducibility during testing
             )
+
+            print(f"  Verifying {num_draft_tokens} draft tokens (temp={sampling_params.temperature}, top_k={sampling_params.top_k})")
 
             outputs = self.llm.generate(
                 prompts=[prefix_text],
@@ -75,28 +97,14 @@ class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceS
             target_output = outputs[0].outputs[0]
             target_tokens = target_output.token_ids
 
-            # Compare draft vs target tokens
-            num_accepted = 0
-            acceptance_mask = []
-            corrected_tokens = []
-            corrected_logprobs = []
-
-            for i, (draft_token, target_token) in enumerate(zip(request.draft_token_ids, target_tokens)):
-                if draft_token == target_token:
-                    # Token matches - accept it
-                    num_accepted += 1
-                    acceptance_mask.append(True)
-                else:
-                    # Mismatch - take target's token and stop
-                    acceptance_mask.append(False)
-                    corrected_tokens.append(target_token)
-
-                    # Get logprob for corrected token
-                    if target_output.logprobs and i < len(target_output.logprobs):
-                        token_logprobs = target_output.logprobs[i]
-                        if target_token in token_logprobs:
-                            corrected_logprobs.append(token_logprobs[target_token].logprob)
-                    break
+            # Use the configured verification strategy
+            num_accepted, acceptance_mask, corrected_tokens, corrected_logprobs = \
+                self.verification_strategy.verify(
+                    draft_token_ids=list(request.draft_token_ids),
+                    draft_logprobs=list(request.draft_logprobs),
+                    target_token_ids=target_tokens,
+                    target_logprobs=target_output.logprobs,
+                )
 
             # Get next token after verification
             next_token_id = 0
@@ -176,7 +184,7 @@ def serve(port=50051):
 
     print(f"\n{'='*80}")
     print(f"🎯 Verification Service (Target Node) started on port {port}")
-    print(f"   Model: facebook/opt-6.7b")
+    print(f"   Model: facebook/opt-1.3b")
     print(f"   Ready to verify draft tokens from draft nodes")
     print(f"{'='*80}\n")
 
