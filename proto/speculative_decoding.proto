@@ -1,0 +1,177 @@
+syntax = "proto3";
+
+package treehacks.speculative;
+
+import "common.proto";
+
+// Service running on draft nodes (weak GPUs) - receives requests from router
+service DraftNodeService {
+  // Execute inference request with speculative decoding
+  rpc ExecuteInference(InferenceJobRequest) returns (InferenceJobResponse);
+
+  // Stream inference results
+  rpc StreamInference(InferenceJobRequest) returns (stream InferenceStreamChunk);
+}
+
+// Service running on powerful workers - called by draft nodes for verification
+service VerificationService {
+  // Verify draft tokens with the powerful model
+  rpc VerifyDraft(VerificationRequest) returns (VerificationResponse);
+
+  // Batch verification for efficiency
+  rpc BatchVerify(BatchVerificationRequest) returns (BatchVerificationResponse);
+}
+
+// Job request from router to draft node
+message InferenceJobRequest {
+  string request_id = 1;
+  string prompt = 2;
+  common.InferenceParams params = 3;
+  string model_id = 4;  // Target model ID for verification worker
+  int64 timestamp = 5;
+}
+
+// Job response from draft node back to router
+message InferenceJobResponse {
+  string request_id = 1;
+  string generated_text = 2;
+  repeated common.Token tokens = 3;
+  common.StatusCode status = 4;
+  string error_message = 5;
+
+  // Speculative decoding metrics
+  int64 total_tokens = 6;
+  int64 draft_tokens_generated = 7;
+  int64 draft_tokens_accepted = 8;
+  float generation_time_ms = 9;
+  float acceptance_rate = 10;
+  int32 speculation_rounds = 11;  // Number of draft-verify cycles
+}
+
+// Streaming chunk from draft node
+message InferenceStreamChunk {
+  string request_id = 1;
+  common.Token token = 2;
+  bool is_final = 3;
+  InferenceJobResponse final_response = 4;  // Populated when is_final = true
+}
+
+// Internal: Draft request for the draft node's own generation
+message DraftRequest {
+  string request_id = 1;
+  string session_id = 2;  // Session for KV cache reuse
+
+  // Context for drafting
+  repeated int32 prefix_token_ids = 3;
+  string prefix_text = 4;  // Optional: for debugging
+
+  // Drafting parameters
+  int32 num_draft_tokens = 5;
+  float temperature = 6;
+  int32 top_k = 7;
+
+  // KV cache hint for optimization
+  int32 kv_cache_offset = 8;
+}
+
+// Response containing drafted tokens
+message DraftResponse {
+  string request_id = 1;
+  string session_id = 2;
+
+  // Drafted sequence
+  repeated int32 draft_token_ids = 3;
+  repeated string draft_tokens_text = 4;  // For debugging
+
+  // Log probabilities for verification
+  repeated float logprobs = 5;
+
+  // Next token probability distribution (for the token after draft)
+  repeated float next_token_logits = 6;  // Full distribution or top-k
+  repeated int32 next_token_ids = 7;     // Corresponding token IDs
+
+  // Metadata
+  float draft_time_ms = 8;
+  int32 kv_cache_size = 9;
+}
+
+// Streaming draft response
+message DraftStreamResponse {
+  string request_id = 1;
+  int32 token_position = 2;
+  int32 token_id = 3;
+  string token_text = 4;
+  float logprob = 5;
+  bool is_final = 6;
+
+  // When is_final = true, include full response
+  DraftResponse final_response = 7;
+}
+
+// Verification request from target model
+message VerificationRequest {
+  string request_id = 1;
+  string session_id = 2;
+
+  // Context (same as draft request)
+  repeated int32 prefix_token_ids = 3;
+
+  // Draft to verify
+  repeated int32 draft_token_ids = 4;
+  repeated float draft_logprobs = 5;
+
+  // Target model parameters
+  float temperature = 6;
+  int32 top_k = 7;
+}
+
+// Verification result
+message VerificationResponse {
+  string request_id = 1;
+  string session_id = 2;
+
+  // Acceptance results
+  int32 num_accepted_tokens = 3;
+  repeated bool acceptance_mask = 4;  // True for accepted tokens
+
+  // Corrected sequence (if any tokens rejected)
+  repeated int32 corrected_token_ids = 5;
+  repeated float corrected_logprobs = 6;
+
+  // Next token from target model
+  int32 next_token_id = 7;
+  float next_token_logprob = 8;
+
+  // Metadata
+  float verification_time_ms = 9;
+  float acceptance_rate = 10;
+}
+
+// Batch verification for multiple sequences
+message BatchVerificationRequest {
+  repeated VerificationRequest requests = 1;
+  int32 max_batch_size = 2;
+}
+
+// Batch verification response
+message BatchVerificationResponse {
+  repeated VerificationResponse responses = 1;
+  float total_batch_time_ms = 2;
+}
+
+// Coordination message for draft-verify loop
+message SpeculativeDecodingCoordination {
+  string request_id = 1;
+
+  enum CoordinationCommand {
+    COMMAND_UNKNOWN = 0;
+    COMMAND_START_DRAFTING = 1;
+    COMMAND_STOP_DRAFTING = 2;
+    COMMAND_PAUSE = 3;
+    COMMAND_RESUME = 4;
+    COMMAND_UPDATE_PARAMS = 5;
+  }
+
+  CoordinationCommand command = 2;
+  common.InferenceParams updated_params = 3;
+}

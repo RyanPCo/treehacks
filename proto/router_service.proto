@@ -1,0 +1,126 @@
+syntax = "proto3";
+
+package treehacks.router;
+
+import "common.proto";
+
+// Router service for coordinating between frontend and workers
+service RouterService {
+  // Worker registration and heartbeat
+  rpc RegisterWorker(WorkerRegistration) returns (WorkerRegistrationResponse);
+  rpc WorkerHeartbeat(WorkerHeartbeatRequest) returns (WorkerHeartbeatResponse);
+
+  // Draft node registration
+  rpc RegisterDraftNode(DraftNodeRegistration) returns (DraftNodeRegistrationResponse);
+  rpc DraftNodeHeartbeat(DraftNodeHeartbeatRequest) returns (DraftNodeHeartbeatResponse);
+
+  // Internal request routing (called by frontend service)
+  rpc RouteRequest(RouteRequestMessage) returns (RouteRequestResponse);
+
+  // Draft node lookup for powerful worker assignment
+  rpc GetWorkerAssignment(WorkerAssignmentRequest) returns (WorkerAssignmentResponse);
+}
+
+// Worker node types
+enum WorkerType {
+  WORKER_TYPE_UNKNOWN = 0;
+  WORKER_TYPE_TARGET_MODEL = 1;  // Powerful GPU running full model
+  WORKER_TYPE_DRAFT_MODEL = 2;   // Weak GPU running draft model
+}
+
+// Worker registration
+message WorkerRegistration {
+  string worker_id = 1;
+  string address = 2;  // IP:port
+  WorkerType worker_type = 3;
+  common.ModelInfo model_info = 4;
+
+  // Hardware capabilities
+  string gpu_model = 5;
+  int64 gpu_memory_bytes = 6;
+  int32 gpu_count = 7;
+
+  // Capacity
+  int32 max_concurrent_requests = 8;
+  int32 max_batch_size = 9;
+}
+
+message WorkerRegistrationResponse {
+  bool accepted = 1;
+  string message = 2;
+  string assigned_worker_id = 3;  // Server may assign different ID
+}
+
+// Worker heartbeat
+message WorkerHeartbeatRequest {
+  string worker_id = 1;
+  common.ResourceStats stats = 2;
+  repeated string active_request_ids = 3;
+}
+
+message WorkerHeartbeatResponse {
+  bool acknowledged = 1;
+  int64 next_heartbeat_interval_ms = 2;
+}
+
+// Draft node registration
+message DraftNodeRegistration {
+  string draft_node_id = 1;
+  string address = 2;
+  common.ModelInfo model_info = 3;
+  string gpu_model = 4;
+  int64 gpu_memory_bytes = 5;
+  int32 max_draft_tokens = 6;
+}
+
+message DraftNodeRegistrationResponse {
+  bool accepted = 1;
+  string message = 2;
+  string assigned_node_id = 3;
+}
+
+// Draft node heartbeat
+message DraftNodeHeartbeatRequest {
+  string draft_node_id = 1;
+  common.ResourceStats stats = 2;
+  int32 available_capacity = 3;
+}
+
+message DraftNodeHeartbeatResponse {
+  bool acknowledged = 1;
+  int64 next_heartbeat_interval_ms = 2;
+}
+
+// Request routing
+message RouteRequestMessage {
+  string request_id = 1;
+  string prompt = 2;
+  common.InferenceParams params = 3;
+  string model_id = 4;
+  int32 priority = 5;  // Higher priority gets scheduled first
+}
+
+message RouteRequestResponse {
+  string request_id = 1;
+  string assigned_draft_node_id = 2;  // Primary draft node handling the request
+  common.StatusCode status = 3;
+  string message = 4;
+  int64 estimated_queue_time_ms = 5;
+}
+
+// Request from draft node to get assigned powerful worker
+message WorkerAssignmentRequest {
+  string request_id = 1;
+  string draft_node_id = 2;
+  string model_id = 3;  // Which target model is needed
+}
+
+// Response with powerful worker details
+message WorkerAssignmentResponse {
+  string request_id = 1;
+  string worker_id = 2;
+  string worker_address = 3;  // IP:port of the powerful worker
+  common.ModelInfo model_info = 4;
+  common.StatusCode status = 5;
+  string message = 6;
+}

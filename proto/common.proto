@@ -1,0 +1,58 @@
+syntax = "proto3";
+
+package treehacks.common;
+
+// Common message types used across services
+
+// Inference parameters for controlling generation
+message InferenceParams {
+  int32 max_tokens = 1;
+  float temperature = 2;
+  float top_p = 3;
+  int32 top_k = 4;
+  repeated string stop_sequences = 5;
+  int32 seed = 6;
+
+  // Speculative decoding specific parameters
+  int32 draft_tokens = 7;  // Number of tokens to draft per speculation step
+  float acceptance_threshold = 8;  // Minimum probability threshold for accepting draft tokens
+}
+
+// Token with associated metadata
+message Token {
+  int32 token_id = 1;
+  string text = 2;
+  float logprob = 3;
+}
+
+// Sequence of tokens with metadata
+message TokenSequence {
+  repeated Token tokens = 1;
+  repeated float logprobs = 2;  // Log probabilities for each token
+}
+
+// Status codes for requests
+enum StatusCode {
+  STATUS_UNKNOWN = 0;
+  STATUS_SUCCESS = 1;
+  STATUS_PENDING = 2;
+  STATUS_FAILED = 3;
+  STATUS_TIMEOUT = 4;
+  STATUS_RESOURCE_EXHAUSTED = 5;
+}
+
+// Model information
+message ModelInfo {
+  string model_id = 1;
+  string model_name = 2;
+  string version = 3;
+}
+
+// Resource usage statistics
+message ResourceStats {
+  float gpu_utilization = 1;
+  int64 memory_used_bytes = 2;
+  int64 memory_total_bytes = 3;
+  int32 active_requests = 4;
+  float tokens_per_second = 5;
+}

@@ -1,0 +1,83 @@
+syntax = "proto3";
+
+package treehacks.frontend;
+
+import "common.proto";
+
+// Frontend-facing service for inference requests
+service FrontendService {
+  // Submit an inference request
+  rpc Inference(InferenceRequest) returns (InferenceResponse);
+
+  // Stream inference results as they're generated
+  rpc StreamInference(InferenceRequest) returns (stream InferenceStreamResponse);
+
+  // Get status of a pending request
+  rpc GetStatus(StatusRequest) returns (StatusResponse);
+
+  // Cancel a pending or running request
+  rpc CancelRequest(CancelRequest) returns (CancelResponse);
+}
+
+// Request for inference
+message InferenceRequest {
+  string request_id = 1;  // Client-provided request ID for tracking
+  string prompt = 2;
+  common.InferenceParams params = 3;
+  string model_id = 4;  // Which model to use
+  int64 timestamp = 5;
+}
+
+// Response for complete inference
+message InferenceResponse {
+  string request_id = 1;
+  string generated_text = 2;
+  repeated common.Token tokens = 3;
+  common.StatusCode status = 4;
+  string error_message = 5;
+
+  // Metadata
+  int64 total_tokens = 6;
+  int64 draft_tokens_generated = 7;
+  int64 draft_tokens_accepted = 8;
+  float generation_time_ms = 9;
+  float acceptance_rate = 10;  // Ratio of accepted to drafted tokens
+}
+
+// Streaming response chunk
+message InferenceStreamResponse {
+  string request_id = 1;
+  common.Token token = 2;
+  bool is_final = 3;
+  common.StatusCode status = 4;
+  string error_message = 5;
+
+  // Optional: include stats when is_final = true
+  InferenceResponse final_response = 6;
+}
+
+// Status query request
+message StatusRequest {
+  string request_id = 1;
+}
+
+// Status query response
+message StatusResponse {
+  string request_id = 1;
+  common.StatusCode status = 2;
+  string message = 3;
+  int32 tokens_generated = 4;
+  float progress_estimate = 5;  // 0.0 to 1.0
+}
+
+// Cancel request message
+message CancelRequest {
+  string request_id = 1;
+}
+
+// Cancel response
+message CancelResponse {
+  string request_id = 1;
+  bool cancelled = 2;
+  string message = 3;
+}
