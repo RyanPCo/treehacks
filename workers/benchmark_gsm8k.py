@@ -159,7 +159,7 @@ def load_humaneval_from_hf(num_samples=50):
 
 def run_baseline(
     questions,
-    max_tokens=512,
+    max_tokens=128,
     temperature=0.0,
     humaneval=False,
 ):
@@ -542,9 +542,9 @@ def main():
                         help='Target model (on server) (default: Qwen/Qwen3-1.7B-Instruct)')
     parser.add_argument('--num-samples', type=int, default=10,
                         help='Number of questions to test (default: 10)')
-    parser.add_argument('--max-tokens', type=int, default=512,
+    parser.add_argument('--max-tokens', type=int, default=128,
                         help='Maximum tokens to generate per question (default: 512)')
-    parser.add_argument('--temperature', type=float, default=0.0,
+    parser.add_argument('--temperature', type=float, default=1.0,
                         help='Sampling temperature (default: 0.0 for greedy)')
     parser.add_argument('--use-hf', action='store_true',
                         help='Load dataset from HuggingFace (requires: pip install datasets)')

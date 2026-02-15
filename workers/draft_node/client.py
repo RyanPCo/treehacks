@@ -55,7 +55,7 @@ class DraftNodeClient:
         draft_model="Qwen/Qwen2.5-0.5B-Instruct",
         num_draft_tokens=5,
         num_candidates=1,
-        candidate_temperature=1.0,
+        candidate_temperature=0.0,
         candidate_top_p=0.9,
         optimistic_prefill=True,
         modal_app_name="treehacks-verification-service",
@@ -66,6 +66,7 @@ class DraftNodeClient:
             model=draft_model,
             gpu_memory_utilization=0.9,
             max_model_len=4096,
+            enable_prefix_caching=True,
         )
 
         self.num_draft_tokens = num_draft_tokens
@@ -160,7 +161,6 @@ class DraftNodeClient:
         # Per-round timing arrays
         timing_draft_ms = []
         timing_verify_ms = []
-        timing_verify_server_ms = []  # server-side GPU time (no network)
         timing_process_ms = []
         timing_optimistic_ms = []
 
@@ -168,6 +168,7 @@ class DraftNodeClient:
         draft_tokens_per_round = request.params.draft_tokens if request.params.draft_tokens > 0 else self.num_draft_tokens
 
         eos_token_ids = self.eos_token_ids
+        REPEAT_WINDOW = 6  # stop if last N tokens are all the same
 
         print(f"\n{'='*80}")
         print(f"Starting inference for request: {request.request_id}")
@@ -194,17 +195,12 @@ class DraftNodeClient:
             eos_reached = False
             if pending_verify is not None:
                 verify_result_raw = pending_verify.get()
-                verify_time = (time.time() - pending_spawn_time) * 1000
-                timing_verify_ms.append(verify_time)
+                timing_verify_ms.append(verify_result_raw.get("verification_time_ms", 0.0))
 
                 process_start = time.time()
 
                 prev_candidates = pending_candidates
                 prev_active_n = pending_active_n
-
-                # Extract server-side verification time (GPU only, no network)
-                server_verify_time = verify_result_raw.get("verification_time_ms", 0.0)
-                timing_verify_server_ms.append(server_verify_time)
 
                 if prev_active_n > 1:
                     verify_response = verify_result_raw
@@ -335,6 +331,13 @@ class DraftNodeClient:
                     all_tokens.append(token)
                     current_token_ids.append(verify_result["next_token_id"])
                     eos_reached = True
+
+                # Check for repetition loop
+                if not eos_reached and len(all_tokens) >= REPEAT_WINDOW:
+                    last_ids = [t.token_id for t in all_tokens[-REPEAT_WINDOW:]]
+                    if len(set(last_ids)) == 1:
+                        print(f"    Repetition detected (token {last_ids[0]} repeated {REPEAT_WINDOW}x), ending generation")
+                        eos_reached = True
                     round_token_events.append({
                         "text": token.text,
                         "type": "accepted",
@@ -343,9 +346,10 @@ class DraftNodeClient:
                     })
 
                 if eos_reached:
-                    eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
-                    if eos_idx is not None:
-                        current_token_ids = current_token_ids[:eos_idx + 1]
+                    if eos_token_ids:
+                        eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
+                        if eos_idx is not None:
+                            current_token_ids = current_token_ids[:eos_idx + 1]
                     print(f"    EOS token reached, ending generation")
 
                     process_time = (time.time() - process_start) * 1000
@@ -594,12 +598,10 @@ class DraftNodeClient:
                         total_draft_accepted += num_accepted
                         best_draft = draft_token_ids
 
-                    verify_time = (time.time() - verify_start) * 1000
-                    timing_verify_ms.append(verify_time)
-
-                    # Server-side GPU time for fallback path
-                    if isinstance(verify_result, dict):
-                        timing_verify_server_ms.append(verify_result.get("verification_time_ms", 0.0))
+                    if active_n > 1:
+                        timing_verify_ms.append(verify_response.get("verification_time_ms", 0.0))
+                    else:
+                        timing_verify_ms.append(verify_result.get("verification_time_ms", 0.0))
 
                     process_start = time.time()
 
@@ -657,6 +659,13 @@ class DraftNodeClient:
                         all_tokens.append(token)
                         current_token_ids.append(verify_result["next_token_id"])
                         eos_reached = True
+
+                    # Check for repetition loop
+                    if not eos_reached and len(all_tokens) >= REPEAT_WINDOW:
+                        last_ids = [t.token_id for t in all_tokens[-REPEAT_WINDOW:]]
+                        if len(set(last_ids)) == 1:
+                            print(f"    Repetition detected (token {last_ids[0]} repeated {REPEAT_WINDOW}x), ending generation")
+                            eos_reached = True
                         round_token_events.append({"text": token.text, "type": "accepted", "token_id": token.token_id, "logprob": token.logprob})
 
                     # Yield round event for fallback path
@@ -671,9 +680,10 @@ class DraftNodeClient:
                     yield ("round", round_event, round_token_events)
 
                     if eos_reached:
-                        eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
-                        if eos_idx is not None:
-                            current_token_ids = current_token_ids[:eos_idx + 1]
+                        if eos_token_ids:
+                            eos_idx = next((i for i, tid in enumerate(current_token_ids) if tid in eos_token_ids), None)
+                            if eos_idx is not None:
+                                current_token_ids = current_token_ids[:eos_idx + 1]
                         print(f"    EOS token reached, ending generation")
                         process_time = (time.time() - process_start) * 1000
                         timing_process_ms.append(process_time)
@@ -685,7 +695,6 @@ class DraftNodeClient:
                     round_total = draft_time + verify_time + process_time
                     idle_pct = (verify_time / round_total * 100) if round_total > 0 else 0.0
                     print(f"  Round {speculation_rounds} timing (fallback): draft={draft_time:.1f}ms  verify={verify_time:.1f}ms  process={process_time:.1f}ms  (idle={idle_pct:.1f}%)")
-
                 except Exception as e2:
                     print(f"Error during verification: {e2}")
                     import traceback
@@ -716,18 +725,15 @@ class DraftNodeClient:
         # Timing breakdown
         total_draft_time = sum(timing_draft_ms)
         total_verify_time = sum(timing_verify_ms)
-        total_verify_server_time = sum(timing_verify_server_ms)
         total_process_time = sum(timing_process_ms)
         total_optimistic_time = sum(timing_optimistic_ms)
         num_rounds = len(timing_draft_ms)
         total_tracked = total_draft_time + total_verify_time + total_process_time + total_optimistic_time
         idle_pct = (total_verify_time / total_tracked * 100) if total_tracked > 0 else 0.0
-        network_overhead = total_verify_time - total_verify_server_time
 
         print(f"\nTiming breakdown:")
         print(f"   Total draft generation: {total_draft_time:.1f}ms (avg {total_draft_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total draft generation: 0.0ms")
-        print(f"   Total verification wait: {total_verify_time:.1f}ms (avg {total_verify_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total verification wait: 0.0ms")
-        print(f"   Total verify GPU time:  {total_verify_server_time:.1f}ms (network overhead: {network_overhead:.1f}ms)" if num_rounds else "   Total verify GPU time: 0.0ms")
+        print(f"   Total verification (GPU): {total_verify_time:.1f}ms (avg {total_verify_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total verification (GPU): 0.0ms")
         print(f"   Total processing: {total_process_time:.1f}ms (avg {total_process_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total processing: 0.0ms")
         print(f"   Total optimistic gen: {total_optimistic_time:.1f}ms (avg {total_optimistic_time/num_rounds:.1f}ms/round)" if num_rounds else "   Total optimistic gen: 0.0ms")
         print(f"   Draft GPU idle: {idle_pct:.1f}% of wall time")
@@ -737,7 +743,6 @@ class DraftNodeClient:
         self._last_timing = {
             'timing_draft_ms': timing_draft_ms,
             'timing_verify_ms': timing_verify_ms,
-            'timing_verify_server_ms': timing_verify_server_ms,
             'timing_process_ms': timing_process_ms,
             'timing_optimistic_ms': timing_optimistic_ms,
         }
