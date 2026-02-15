@@ -25,7 +25,7 @@ from verification_strategies import get_strategy
 class VerificationServiceImpl(speculative_decoding_pb2_grpc.VerificationServiceServicer):
     def __init__(
         self,
-        model_name="Qwen/Qwen2.5-72B-Instruct-GPTQ-Int4",
+        model_name="Qwen/Qwen3-32B-Instruct",
         strategy="deterministic",
         strategy_kwargs=None,
         gpu_memory_utilization=0.98,

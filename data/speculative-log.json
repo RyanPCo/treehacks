@@ -1,0 +1,376 @@
+{
+  "prompt": "Explain how speculative decoding works.",
+  "rounds": [
+    {
+      "round_num": 1,
+      "verification_time_ms": 12.3,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": "Speculative", "status": "accepted" },
+            { "text": " decoding", "status": "accepted" },
+            { "text": " predicts", "status": "rejected" },
+            { "text": " the", "status": "rejected" },
+            { "text": " outcome", "status": "rejected" }
+          ],
+          "accepted_count": 2
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": "Speculative", "status": "accepted" },
+            { "text": " decoding", "status": "accepted" },
+            { "text": " is", "status": "accepted" },
+            { "text": " a", "status": "accepted" },
+            { "text": " technique", "status": "accepted" }
+          ],
+          "accepted_count": 5
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": "Speculative", "status": "accepted" },
+            { "text": " decoding", "status": "accepted" },
+            { "text": " accelerates", "status": "rejected" },
+            { "text": " text", "status": "rejected" },
+            { "text": " generation", "status": "rejected" }
+          ],
+          "accepted_count": 2
+        }
+      ],
+      "chosen_draft": "b",
+      "correction": null
+    },
+    {
+      "round_num": 2,
+      "verification_time_ms": 14.1,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " used", "status": "accepted" },
+            { "text": " in", "status": "accepted" },
+            { "text": " large", "status": "accepted" },
+            { "text": " language", "status": "accepted" },
+            { "text": " model", "status": "rejected" }
+          ],
+          "accepted_count": 4
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " where", "status": "accepted" },
+            { "text": " a", "status": "accepted" },
+            { "text": " smaller", "status": "accepted" },
+            { "text": " ,", "status": "rejected" },
+            { "text": " faster", "status": "rejected" }
+          ],
+          "accepted_count": 3
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " for", "status": "rejected" },
+            { "text": " accelerating", "status": "rejected" },
+            { "text": " LLM", "status": "rejected" },
+            { "text": " inference", "status": "rejected" },
+            { "text": " speed", "status": "rejected" }
+          ],
+          "accepted_count": 0
+        }
+      ],
+      "chosen_draft": "a",
+      "correction": { "text": " models" }
+    },
+    {
+      "round_num": 3,
+      "verification_time_ms": 11.8,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " to", "status": "accepted" },
+            { "text": " accelerate", "status": "accepted" },
+            { "text": " inference", "status": "rejected" },
+            { "text": " by", "status": "rejected" },
+            { "text": " having", "status": "rejected" }
+          ],
+          "accepted_count": 2
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " to", "status": "accepted" },
+            { "text": " speed", "status": "rejected" },
+            { "text": " up", "status": "rejected" },
+            { "text": " generation", "status": "rejected" },
+            { "text": " by", "status": "rejected" }
+          ],
+          "accepted_count": 1
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " to", "status": "accepted" },
+            { "text": " accelerate", "status": "accepted" },
+            { "text": " text", "status": "accepted" },
+            { "text": " generation", "status": "accepted" },
+            { "text": " speed", "status": "rejected" }
+          ],
+          "accepted_count": 4
+        }
+      ],
+      "chosen_draft": "c",
+      "correction": { "text": " by" }
+    },
+    {
+      "round_num": 4,
+      "verification_time_ms": 13.5,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " using", "status": "accepted" },
+            { "text": " two", "status": "rejected" },
+            { "text": " models", "status": "rejected" },
+            { "text": " together", "status": "rejected" },
+            { "text": " :", "status": "rejected" }
+          ],
+          "accepted_count": 1
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " using", "status": "accepted" },
+            { "text": " a", "status": "accepted" },
+            { "text": " smaller", "status": "accepted" },
+            { "text": ",", "status": "accepted" },
+            { "text": " faster", "status": "accepted" }
+          ],
+          "accepted_count": 5
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " leveraging", "status": "rejected" },
+            { "text": " a", "status": "rejected" },
+            { "text": " lightweight", "status": "rejected" },
+            { "text": " draft", "status": "rejected" },
+            { "text": " model", "status": "rejected" }
+          ],
+          "accepted_count": 0
+        }
+      ],
+      "chosen_draft": "b",
+      "correction": null
+    },
+    {
+      "round_num": 5,
+      "verification_time_ms": 12.0,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " draft", "status": "accepted" },
+            { "text": " model", "status": "accepted" },
+            { "text": " to", "status": "accepted" },
+            { "text": " predict", "status": "accepted" },
+            { "text": " several", "status": "rejected" }
+          ],
+          "accepted_count": 4
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " draft", "status": "accepted" },
+            { "text": " model", "status": "accepted" },
+            { "text": " to", "status": "accepted" },
+            { "text": " generate", "status": "rejected" },
+            { "text": " candidate", "status": "rejected" }
+          ],
+          "accepted_count": 3
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " model", "status": "rejected" },
+            { "text": " that", "status": "rejected" },
+            { "text": " generates", "status": "rejected" },
+            { "text": " token", "status": "rejected" },
+            { "text": " candidates", "status": "rejected" }
+          ],
+          "accepted_count": 0
+        }
+      ],
+      "chosen_draft": "a",
+      "correction": { "text": " multiple" }
+    },
+    {
+      "round_num": 6,
+      "verification_time_ms": 10.9,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " tokens", "status": "accepted" },
+            { "text": " ahead", "status": "accepted" },
+            { "text": ",", "status": "accepted" },
+            { "text": " which", "status": "accepted" },
+            { "text": " the", "status": "accepted" }
+          ],
+          "accepted_count": 5
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " tokens", "status": "accepted" },
+            { "text": " ahead", "status": "accepted" },
+            { "text": ".", "status": "rejected" },
+            { "text": " The", "status": "rejected" },
+            { "text": " larger", "status": "rejected" }
+          ],
+          "accepted_count": 2
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " tokens", "status": "accepted" },
+            { "text": " at", "status": "rejected" },
+            { "text": " once", "status": "rejected" },
+            { "text": ",", "status": "rejected" },
+            { "text": " then", "status": "rejected" }
+          ],
+          "accepted_count": 1
+        }
+      ],
+      "chosen_draft": "a",
+      "correction": null
+    },
+    {
+      "round_num": 7,
+      "verification_time_ms": 13.2,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " larger", "status": "accepted" },
+            { "text": " target", "status": "accepted" },
+            { "text": " model", "status": "accepted" },
+            { "text": " then", "status": "accepted" },
+            { "text": " checks", "status": "rejected" }
+          ],
+          "accepted_count": 4
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " larger", "status": "accepted" },
+            { "text": " target", "status": "accepted" },
+            { "text": " model", "status": "accepted" },
+            { "text": " then", "status": "accepted" },
+            { "text": " validates", "status": "rejected" }
+          ],
+          "accepted_count": 4
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " main", "status": "rejected" },
+            { "text": " model", "status": "rejected" },
+            { "text": " validates", "status": "rejected" },
+            { "text": " all", "status": "rejected" },
+            { "text": " at", "status": "rejected" }
+          ],
+          "accepted_count": 0
+        }
+      ],
+      "chosen_draft": "a",
+      "correction": { "text": " verifies" }
+    },
+    {
+      "round_num": 8,
+      "verification_time_ms": 11.4,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " in", "status": "accepted" },
+            { "text": " parallel", "status": "accepted" },
+            { "text": ".", "status": "rejected" },
+            { "text": " This", "status": "rejected" },
+            { "text": " allows", "status": "rejected" }
+          ],
+          "accepted_count": 2
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " in", "status": "accepted" },
+            { "text": " a", "status": "rejected" },
+            { "text": " single", "status": "rejected" },
+            { "text": " forward", "status": "rejected" },
+            { "text": " pass", "status": "rejected" }
+          ],
+          "accepted_count": 1
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " in", "status": "accepted" },
+            { "text": " parallel", "status": "accepted" },
+            { "text": " to", "status": "accepted" },
+            { "text": " reduce", "status": "accepted" },
+            { "text": " sequential", "status": "accepted" }
+          ],
+          "accepted_count": 5
+        }
+      ],
+      "chosen_draft": "c",
+      "correction": null
+    },
+    {
+      "round_num": 9,
+      "verification_time_ms": 10.5,
+      "drafts": [
+        {
+          "id": "a",
+          "tokens": [
+            { "text": " decoding", "status": "accepted" },
+            { "text": " steps", "status": "accepted" },
+            { "text": ".", "status": "accepted" }
+          ],
+          "accepted_count": 3
+        },
+        {
+          "id": "b",
+          "tokens": [
+            { "text": " decoding", "status": "accepted" },
+            { "text": " overhead", "status": "rejected" },
+            { "text": ".", "status": "rejected" }
+          ],
+          "accepted_count": 1
+        },
+        {
+          "id": "c",
+          "tokens": [
+            { "text": " time", "status": "rejected" },
+            { "text": " significantly", "status": "rejected" },
+            { "text": ".", "status": "rejected" }
+          ],
+          "accepted_count": 0
+        }
+      ],
+      "chosen_draft": "a",
+      "correction": null
+    }
+  ],
+  "summary": {
+    "total_tokens": 41,
+    "draft_tokens_generated": 129,
+    "draft_tokens_accepted": 41,
+    "acceptance_rate": 0.80,
+    "speculation_rounds": 9,
+    "generation_time_ms": 412
+  }
+}

@@ -83,3 +83,12 @@ export async function checkHealth(): Promise<boolean> {
     return false
   }
 }
+
+/** POST /api/warmup */
+export async function warmupDraftModel(): Promise<void> {
+  try {
+    await fetch(`${API_URL}/api/warmup`, { method: "POST" })
+  } catch {
+    // Best-effort warmup; inference path still lazily initializes on first prompt.
+  }
+}
