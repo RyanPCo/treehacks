@@ -6,15 +6,21 @@ import modal
 import sys
 import os
 import threading
+import argparse
 from vllm import LLM, SamplingParams
 import time
 from dataclasses import dataclass
+from concurrent import futures
+
+import grpc
+import httpx
 
 # Add proto directory to path
 sys.path.insert(0, os.path.join(os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__)))), 'proto'))
 
 import common_pb2
 import speculative_decoding_pb2
+import speculative_decoding_pb2_grpc
 
 
 @dataclass
@@ -57,7 +63,7 @@ class DraftNodeClient:
         num_candidates=1,
         candidate_temperature=0.0,
         candidate_top_p=0.9,
-        optimistic_prefill=True,
+        optimistic_prefill=False,
         modal_app_name="treehacks-verification-service",
         modal_class_name="VerificationService",
     ):
@@ -338,12 +344,6 @@ class DraftNodeClient:
                     if len(set(last_ids)) == 1:
                         print(f"    Repetition detected (token {last_ids[0]} repeated {REPEAT_WINDOW}x), ending generation")
                         eos_reached = True
-                    round_token_events.append({
-                        "text": token.text,
-                        "type": "accepted",
-                        "token_id": token.token_id,
-                        "logprob": token.logprob,
-                    })
 
                 if eos_reached:
                     if eos_token_ids:
@@ -666,7 +666,6 @@ class DraftNodeClient:
                         if len(set(last_ids)) == 1:
                             print(f"    Repetition detected (token {last_ids[0]} repeated {REPEAT_WINDOW}x), ending generation")
                             eos_reached = True
-                        round_token_events.append({"text": token.text, "type": "accepted", "token_id": token.token_id, "logprob": token.logprob})
 
                     # Yield round event for fallback path
                     round_event = {
@@ -703,7 +702,7 @@ class DraftNodeClient:
 
         # Generate final response
         elapsed = (time.time() - start_time) * 1000
-        final_text = self.tokenizer.decode(current_token_ids, skip_special_tokens=True)
+        final_text = "".join(t.text for t in all_tokens)
         acceptance_rate = total_draft_accepted / total_draft_generated if total_draft_generated > 0 else 0.0
 
         print(f"\n{'='*80}")
@@ -780,14 +779,265 @@ class DraftNodeClient:
                 pass
 
 
-def main():
-    """Example usage"""
-    print("\n" + "="*80)
+DEFAULT_HEARTBEAT_INTERVAL_MS = 5000
+
+
+def _router_url(value: str) -> str:
+    value = value.strip()
+    if not value:
+        return ""
+    if value.startswith("http://") or value.startswith("https://"):
+        return value.rstrip("/")
+    return f"http://{value.rstrip('/')}"
+
+
+class RouterRegistrationClient:
+    """Handles startup registration and periodic heartbeats to router."""
+
+    def __init__(
+        self,
+        router_address: str,
+        draft_node_id: str,
+        advertise_address: str,
+        model_id: str,
+        max_draft_tokens: int,
+        timeout_s: float,
+    ):
+        self.base_url = _router_url(router_address)
+        self.draft_node_id = draft_node_id.strip()
+        self.advertise_address = advertise_address
+        self.model_id = model_id
+        self.max_draft_tokens = max_draft_tokens
+        self.timeout_s = timeout_s
+
+    @property
+    def enabled(self) -> bool:
+        return bool(self.base_url)
+
+    def register(self) -> bool:
+        if not self.enabled:
+            return False
+
+        payload = {
+            "draft_node_id": self.draft_node_id,
+            "address": self.advertise_address,
+            "model_info": {
+                "model_id": self.model_id,
+                "model_name": self.model_id,
+                "version": "",
+            },
+            "gpu_model": "",
+            "gpu_memory_bytes": 0,
+            "max_draft_tokens": self.max_draft_tokens,
+        }
+        response = httpx.post(
+            f"{self.base_url}/register-draft-node",
+            json=payload,
+            timeout=self.timeout_s,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        assigned_node_id = data.get("assigned_node_id", "")
+        if data.get("accepted") and assigned_node_id:
+            self.draft_node_id = assigned_node_id
+            return True
+        return False
+
+    def heartbeat(self) -> int:
+        if not self.enabled or not self.draft_node_id:
+            return DEFAULT_HEARTBEAT_INTERVAL_MS
+
+        payload = {
+            "draft_node_id": self.draft_node_id,
+            "stats": {
+                "gpu_utilization": 0.0,
+                "memory_used_bytes": 0,
+                "memory_total_bytes": 0,
+                "active_requests": 0,
+                "tokens_per_second": 0.0,
+            },
+            "available_capacity": 1,
+        }
+        response = httpx.post(
+            f"{self.base_url}/draft-heartbeat",
+            json=payload,
+            timeout=self.timeout_s,
+        )
+        response.raise_for_status()
+        data = response.json()
+
+        next_interval_ms = int(data.get("next_heartbeat_interval_ms", DEFAULT_HEARTBEAT_INTERVAL_MS))
+        return next_interval_ms if next_interval_ms > 0 else DEFAULT_HEARTBEAT_INTERVAL_MS
+
+
+class DraftNodeServiceImpl(speculative_decoding_pb2_grpc.DraftNodeServiceServicer):
+    def __init__(self, client: DraftNodeClient):
+        self._client = client
+
+    @staticmethod
+    def _encode_stream_logprob(token_type: str, logprob: float) -> float:
+        # Preserve token type over proto without changing schema.
+        # Keep sentinels far from normal logprobs to avoid collisions.
+        if token_type == "rejected":
+            return 1_000_000.0
+        if token_type == "corrected":
+            return 2_000_000.0
+        return logprob
+
+    def ExecuteInference(self, request, context):
+        try:
+            return self._client.execute_inference(request)
+        except Exception as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(exc))
+            return speculative_decoding_pb2.InferenceJobResponse(
+                request_id=request.request_id,
+                status=common_pb2.STATUS_FAILED,
+                error_message=str(exc),
+            )
+
+    def StreamInference(self, request, context):
+        try:
+            final_response = None
+            for event_type, data, tokens in self._client.execute_inference_stream(request):
+                if event_type == "round":
+                    for token in tokens:
+                        if isinstance(token, dict):
+                            token_type = token.get("type", "accepted")
+                            token_msg = common_pb2.Token(
+                                token_id=token.get("token_id", 0),
+                                text=token.get("text", ""),
+                                logprob=self._encode_stream_logprob(token_type, token.get("logprob", 0.0)),
+                            )
+                        else:
+                            token_msg = common_pb2.Token(
+                                token_id=token.token_id,
+                                text=token.text,
+                                logprob=token.logprob,
+                            )
+
+                        yield speculative_decoding_pb2.InferenceStreamChunk(
+                            request_id=request.request_id,
+                            token=token_msg,
+                            is_final=False,
+                        )
+                elif event_type == "done":
+                    final_response = data
+
+            if final_response is None:
+                raise RuntimeError("Draft node did not produce a final response")
+
+            yield speculative_decoding_pb2.InferenceStreamChunk(
+                request_id=request.request_id,
+                is_final=True,
+                final_response=final_response,
+            )
+        except Exception as exc:
+            context.set_code(grpc.StatusCode.INTERNAL)
+            context.set_details(str(exc))
+
+
+def _start_heartbeat_loop(registrar: RouterRegistrationClient, stop_event: threading.Event):
+    if not registrar.enabled:
+        return None
+
+    def _run():
+        interval_s = DEFAULT_HEARTBEAT_INTERVAL_MS / 1000.0
+        while not stop_event.wait(interval_s):
+            try:
+                next_interval_ms = registrar.heartbeat()
+                interval_s = max(1.0, next_interval_ms / 1000.0)
+            except Exception as exc:
+                print(f"Router heartbeat failed: {exc}")
+                interval_s = DEFAULT_HEARTBEAT_INTERVAL_MS / 1000.0
+
+    thread = threading.Thread(target=_run, daemon=True)
+    thread.start()
+    return thread
+
+
+class DraftNodeMicroservice:
+    """
+    Draft node microservice:
+    - serves DraftNodeService gRPC
+    - registers with router
+    - sends periodic router heartbeats
+    """
+
+    def __init__(
+        self,
+        client: DraftNodeClient,
+        host: str,
+        port: int,
+        advertise_address: str,
+        router_address: str,
+        draft_node_id: str,
+        draft_model: str,
+        max_draft_tokens: int,
+        router_timeout_s: float,
+    ):
+        self.client = client
+        self.server = grpc.server(futures.ThreadPoolExecutor(max_workers=8))
+        speculative_decoding_pb2_grpc.add_DraftNodeServiceServicer_to_server(
+            DraftNodeServiceImpl(client),
+            self.server,
+        )
+        self.server.add_insecure_port(f"{host}:{port}")
+        self.server.start()
+
+        self.registrar = RouterRegistrationClient(
+            router_address=router_address,
+            draft_node_id=draft_node_id,
+            advertise_address=advertise_address,
+            model_id=draft_model,
+            max_draft_tokens=max_draft_tokens,
+            timeout_s=router_timeout_s,
+        )
+
+        if self.registrar.enabled:
+            try:
+                if self.registrar.register():
+                    print(
+                        f"Registered with router {self.registrar.base_url} as "
+                        f"{self.registrar.draft_node_id} ({advertise_address})"
+                    )
+                else:
+                    print(f"Router registration rejected by {self.registrar.base_url}")
+            except Exception as exc:
+                print(f"Router registration failed: {exc}")
+        else:
+            print("Router registration disabled")
+
+        self.stop_event = threading.Event()
+        self.heartbeat_thread = _start_heartbeat_loop(self.registrar, self.stop_event)
+
+        print("\n" + "=" * 72)
+        print("Draft Node gRPC Microservice")
+        print(f"Listening on: {host}:{port}")
+        print(f"Advertised as: {advertise_address}")
+        print(f"Model: {draft_model}")
+        if self.registrar.enabled:
+            print(f"Router: {self.registrar.base_url}")
+        print("=" * 72 + "\n")
+
+    def wait(self):
+        self.server.wait_for_termination()
+
+    def stop(self):
+        self.stop_event.set()
+        if self.heartbeat_thread is not None:
+            self.heartbeat_thread.join(timeout=2)
+        self.server.stop(0)
+
+
+def run_demo():
+    """Local demo mode."""
+    print("\n" + "=" * 80)
     print("Draft Node Client - Speculative Decoding Demo")
-    print("="*80 + "\n")
+    print("=" * 80 + "\n")
 
     client = DraftNodeClient()
-
     test_prompts = [
         "Hello, my name is",
         "The president of the United States is",
@@ -810,14 +1060,75 @@ def main():
         )
 
         response = client.execute_inference(request)
-
-        print(f"\nFinal Stats:")
+        print("\nFinal Stats:")
         print(f"   Status: {common_pb2.StatusCode.Name(response.status)}")
         print(f"   Acceptance Rate: {response.acceptance_rate:.1%}")
-        print(f"   Speed: {response.total_tokens / (response.generation_time_ms/1000):.1f} tokens/sec")
-        print("\n" + "-"*80 + "\n")
-
+        print(f"   Speed: {response.total_tokens / (response.generation_time_ms / 1000):.1f} tokens/sec")
+        print("\n" + "-" * 80 + "\n")
         time.sleep(1)
+
+
+def main():
+    parser = argparse.ArgumentParser(description="Draft Node Client / Microservice")
+    parser.add_argument("--demo", action="store_true", help="Run local demo instead of microservice mode")
+    parser.add_argument("--host", default=os.getenv("DRAFT_NODE_HOST", "0.0.0.0"))
+    parser.add_argument("--port", type=int, default=int(os.getenv("DRAFT_NODE_PORT", "50071")))
+    parser.add_argument(
+        "--advertise-address",
+        default=os.getenv("DRAFT_NODE_ADVERTISE_ADDRESS", ""),
+        help="Address router should use to reach this node (default: 127.0.0.1:<port>)",
+    )
+    parser.add_argument("--router-address", default=os.getenv("ROUTER_ADDRESS", "localhost:50061"))
+    parser.add_argument("--draft-node-id", default=os.getenv("DRAFT_NODE_ID", ""))
+    parser.add_argument("--draft-model", default=os.getenv("DRAFT_MODEL", "Qwen/Qwen2.5-0.5B-Instruct"))
+    parser.add_argument("--max-draft-tokens", type=int, default=int(os.getenv("MAX_DRAFT_TOKENS", "5")))
+    parser.add_argument("--num-candidates", type=int, default=int(os.getenv("NUM_CANDIDATES", "1")))
+    parser.add_argument(
+        "--optimistic-prefill",
+        action=argparse.BooleanOptionalAction,
+        default=os.getenv("OPTIMISTIC_PREFILL", "true").lower() in ("1", "true", "yes"),
+    )
+    parser.add_argument("--modal-app-name", default=os.getenv("MODAL_APP_NAME", "treehacks-verification-service"))
+    parser.add_argument("--modal-class-name", default=os.getenv("MODAL_CLASS_NAME", "VerificationService"))
+    parser.add_argument(
+        "--router-timeout-seconds",
+        type=float,
+        default=float(os.getenv("ROUTER_TIMEOUT_SECONDS", "5")),
+    )
+    args = parser.parse_args()
+
+    if args.demo:
+        print("why are we running the demo?")
+        run_demo()
+        return
+
+    advertise_address = args.advertise_address.strip() or f"127.0.0.1:{args.port}"
+    client = DraftNodeClient(
+        draft_model=args.draft_model,
+        num_draft_tokens=args.max_draft_tokens,
+        num_candidates=args.num_candidates,
+        optimistic_prefill=args.optimistic_prefill,
+        modal_app_name=args.modal_app_name,
+        modal_class_name=args.modal_class_name,
+    )
+
+    service = DraftNodeMicroservice(
+        client=client,
+        host=args.host,
+        port=args.port,
+        advertise_address=advertise_address,
+        router_address=args.router_address,
+        draft_node_id=args.draft_node_id,
+        draft_model=args.draft_model,
+        max_draft_tokens=args.max_draft_tokens,
+        router_timeout_s=args.router_timeout_seconds,
+    )
+    try:
+        service.wait()
+    except KeyboardInterrupt:
+        print("\nShutting down draft node microservice...")
+    finally:
+        service.stop()
 
 
 if __name__ == '__main__':

@@ -149,7 +149,7 @@ export function DashboardBody() {
     }
 
     const cleanup = streamInference(
-      { prompt: userPrompt, max_tokens: 64 },
+      { prompt: userPrompt, max_tokens: 256 },
       (msg: StreamMessage) => {
         if (msg.type === "token") {
           if (msg.data.type === "accepted") {

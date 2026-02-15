@@ -36,8 +36,8 @@ image = (
 )
 @modal.concurrent(max_inputs=10)
 class VerificationService:
-    model_name: str = "Qwen/Qwen3-32B-Instruct"
-    strategy: str = "deterministic"
+    model_name: str = "Qwen/Qwen2.5-32B-Instruct-GPTQ-Int8"
+    strategy: str = "probabilistic"
 
     @modal.enter()
     def setup(self):
@@ -55,7 +55,7 @@ class VerificationService:
             model=self.model_name,
             gpu_memory_utilization=0.90,
             max_model_len=4096,
-            enable_prefix_caching=True,
+            enable_prefix_caching=False,
         )
         self.tokenizer = AutoTokenizer.from_pretrained(self.model_name)
 
